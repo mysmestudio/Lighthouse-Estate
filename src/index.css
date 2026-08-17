@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --ink: #10241A;
+    --forest: #0F472A;
+    --forest-deep: #0A2F1C;
+    --gold: #C89B3C;
+    --gold-soft: #E7D19C;
+    --cream: #FBF8F1;
+    --sand: #F2EAD9;
+    --line: #E4D9BE;
+    --white: #FFFFFF;
+  }
+
+  body {
+    background-color: var(--cream);
+    color: var(--ink);
+    font-family: 'Work Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6, .fraunces, .font-serif {
+    font-family: 'Fraunces', serif;
+  }
+}
+
+/* Typography Helpers */
+.fraunces, .font-serif {
+  font-family: 'Fraunces', serif;
+}
+
+.font-sans {
+  font-family: 'Work Sans', sans-serif;
+}
+
+/* Professional Polish Shadows & Borders */
+.shadow-soft {
+  box-shadow: 0 4px 20px rgba(16, 36, 26, 0.06);
+}
+
+.shadow-soft-lg {
+  box-shadow: 0 8px 30px rgba(16, 36, 26, 0.09);
+}
+
+.border-line {
+  border: 1px solid var(--line);
+}
+
+/* Professional Polish Card Archetypes */
+.card-estate {
+  border-radius: 14px;
+  background-color: #FFFFFF;
+  border: 1px solid #E4D9BE;
+  box-shadow: 0 4px 20px rgba(16, 36, 26, 0.06);
+}
+
+.card-estate-sand {
+  border-radius: 14px;
+  background-color: #F2EAD9;
+  border: 1px solid #E4D9BE;
+}
+
+.card-estate-forest {
+  border-radius: 14px;
+  background-color: #0F472A;
+  color: #FFFFFF;
+  border: 1px solid rgba(200, 155, 60, 0.35);
+  box-shadow: 0 4px 20px rgba(16, 36, 26, 0.08);
+}
+
+/* Buttons */
+.btn-gold {
+  background-color: #C89B3C;
+  color: #FFFFFF;
+  font-weight: 700;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(200, 155, 60, 0.25);
+}
+.btn-gold:hover {
+  background-color: #b28a35;
+}
+
+.btn-forest {
+  background-color: #0F472A;
+  color: #FFFFFF;
+  font-weight: 700;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(15, 71, 42, 0.2);
+}
+.btn-forest:hover {
+  background-color: #0A2F1C;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F2EAD9;
+}
+::-webkit-scrollbar-thumb {
+  background: #C89B3C;
+  border-radius: 4px;
+}
+

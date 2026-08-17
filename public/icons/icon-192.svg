@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="goldGrad192" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E7D19C"/>
+      <stop offset="50%" stop-color="#C89B3C"/>
+      <stop offset="100%" stop-color="#996D1E"/>
+    </linearGradient>
+    <radialGradient id="glow192" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#E7D19C" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#0A2F1C" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background Canvas with rounded squircle -->
+  <rect width="192" height="192" rx="42" fill="#0A2F1C"/>
+  <rect width="192" height="192" rx="42" fill="url(#glow192)"/>
+
+  <!-- Subtle Outer Halo Orbit -->
+  <circle cx="96" cy="96" r="72" stroke="#C89B3C" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.3"/>
+
+  <!-- Gold 8-Point Rub el Hizb Geometric Star Crest -->
+  <g transform="translate(96, 96) scale(4.8)">
+    <!-- Square 1 -->
+    <rect x="-8.5" y="-8.5" width="17" height="17" rx="1.5" stroke="url(#goldGrad192)" stroke-width="1.2" fill="#0F472A" fill-opacity="0.7"/>
+    <!-- Square 2 rotated 45 deg -->
+    <rect x="-8.5" y="-8.5" width="17" height="17" rx="1.5" stroke="url(#goldGrad192)" stroke-width="1.2" fill="#0F472A" fill-opacity="0.7" transform="rotate(45)"/>
+    
+    <!-- Central Jewel / Star core -->
+    <circle cx="0" cy="0" r="3.2" fill="url(#goldGrad192)"/>
+    <circle cx="0" cy="0" r="1.4" fill="#0A2F1C"/>
+    
+    <!-- Fine corner rays -->
+    <circle cx="0" cy="-6" r="0.6" fill="#E7D19C"/>
+    <circle cx="0" cy="6" r="0.6" fill="#E7D19C"/>
+    <circle cx="-6" cy="0" r="0.6" fill="#E7D19C"/>
+    <circle cx="6" cy="0" r="0.6" fill="#E7D19C"/>
+  </g>
+</svg>
