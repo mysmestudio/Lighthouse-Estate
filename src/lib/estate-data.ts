@@ -2,114 +2,7 @@ import { VisitorPass, EstateNotice, AccessLog, AppUser } from '../types';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { getStoredAppUsers } from './auth-helpers';
 
-export const INITIAL_PASSES: VisitorPass[] = [
-  {
-    id: 'pass-101',
-    resident_id: 'user-res-1',
-    resident_name: 'Dr. Tariq Al-Mansoor',
-    resident_phone: '+234 803 123 4567',
-    house_number: 14,
-    house_unit: 'Main House',
-    guest_name: 'Engr. Yusuf Belgore',
-    guest_phone: '+234 802 333 4455',
-    guest_plate_number: 'ABJ-882-LK',
-    pass_type: 'guest',
-    entry_type: 'single',
-    pass_code: '482910',
-    valid_from: new Date(Date.now() - 10 * 60000).toISOString(),
-    valid_until: new Date(Date.now() + 20 * 60000).toISOString(),
-    expires_at: new Date(Date.now() + 20 * 60000).toISOString(),
-    status: 'active',
-    created_at: new Date(Date.now() - 10 * 60000).toISOString(),
-    notes: 'Consultation visit regarding solar battery overhaul',
-  },
-  {
-    id: 'pass-102',
-    resident_id: 'user-res-1',
-    resident_name: 'Dr. Tariq Al-Mansoor',
-    resident_phone: '+234 803 123 4567',
-    house_number: 14,
-    house_unit: 'Main House',
-    guest_name: 'Jumia Food Dispatch',
-    guest_phone: '+234 809 999 1122',
-    guest_plate_number: 'KJA-119-ZZ',
-    pass_type: 'delivery',
-    entry_type: 'single',
-    pass_code: '719304',
-    valid_from: new Date(Date.now() - 5 * 60000).toISOString(),
-    valid_until: new Date(Date.now() + 10 * 60000).toISOString(),
-    expires_at: new Date(Date.now() + 10 * 60000).toISOString(),
-    status: 'active',
-    created_at: new Date(Date.now() - 5 * 60000).toISOString(),
-    notes: 'Hot lunch delivery',
-  },
-  {
-    id: 'pass-103',
-    resident_id: 'user-res-1',
-    resident_name: 'Dr. Tariq Al-Mansoor',
-    resident_phone: '+234 803 123 4567',
-    house_number: 14,
-    house_unit: 'Main House',
-    guest_name: 'Amina & Harun Sadiq',
-    guest_phone: '+234 805 777 8899',
-    guest_plate_number: 'KAD-402-AB',
-    pass_type: 'guest',
-    entry_type: 'single',
-    pass_code: '194820',
-    valid_from: new Date(Date.now() - 4 * 3600000).toISOString(),
-    valid_until: new Date(Date.now() - 2 * 3600000).toISOString(),
-    expires_at: new Date(Date.now() - 2 * 3600000).toISOString(),
-    status: 'used',
-    verified_at: new Date(Date.now() - 3.8 * 3600000).toISOString(),
-    verified_by: 'Officer Ibrahim Bello',
-    created_at: new Date(Date.now() - 5 * 3600000).toISOString(),
-    notes: 'Family visit',
-  },
-  {
-    id: 'pass-104',
-    resident_id: 'user-res-1',
-    resident_name: 'Dr. Tariq Al-Mansoor',
-    resident_phone: '+234 803 123 4567',
-    house_number: 14,
-    house_unit: 'Main House',
-    guest_name: 'Salisu AC Technician',
-    guest_phone: '+234 802 888 1234',
-    guest_plate_number: 'LSR-220-GH',
-    pass_type: 'contractor',
-    entry_type: 'single',
-    artisan_date: new Date().toISOString().split('T')[0],
-    start_time: '08:00',
-    end_time: '17:00',
-    pass_code: '529384',
-    valid_from: `${new Date().toISOString().split('T')[0]}T08:00:00`,
-    valid_until: `${new Date().toISOString().split('T')[0]}T17:00:00`,
-    expires_at: `${new Date().toISOString().split('T')[0]}T17:00:00`,
-    status: 'active',
-    created_at: new Date(Date.now() - 60 * 60000).toISOString(),
-    notes: 'Inverter AC repair in master bedroom',
-  },
-  {
-    id: 'pass-105',
-    resident_id: 'user-res-1',
-    resident_name: 'Dr. Tariq Al-Mansoor',
-    resident_phone: '+234 803 123 4567',
-    house_number: 14,
-    house_unit: 'Main House',
-    guest_name: 'Uncle Sulaiman & Family',
-    guest_phone: '+234 803 555 9012',
-    guest_plate_number: 'ABJ-304-KW',
-    pass_type: 'long_stay',
-    entry_type: 'multi',
-    valid_from: new Date(Date.now() - 24 * 3600000).toISOString().split('T')[0],
-    valid_to: new Date(Date.now() + 7 * 24 * 3600000).toISOString().split('T')[0],
-    valid_until: `${new Date(Date.now() + 7 * 24 * 3600000).toISOString().split('T')[0]}T23:59:59`,
-    expires_at: `${new Date(Date.now() + 7 * 24 * 3600000).toISOString().split('T')[0]}T23:59:59`,
-    pass_code: '839201',
-    status: 'active',
-    created_at: new Date(Date.now() - 24 * 3600000).toISOString(),
-    notes: 'Annual holiday family visit from Abuja (multi-entry pass)',
-  }
-];
+export const INITIAL_PASSES: VisitorPass[] = [];
 
 export const INITIAL_NOTICES: EstateNotice[] = [
   {
@@ -162,36 +55,11 @@ export const INITIAL_NOTICES: EstateNotice[] = [
   }
 ];
 
-export const INITIAL_ACCESS_LOGS: AccessLog[] = [
-  {
-    id: 'log-1',
-    pass_code: '482910',
-    visitor_name: 'Engr. Yusuf Belgore',
-    house_info: 'House 14 (Main House)',
-    direction: 'in',
-    guard_name: 'Officer Ibrahim Bello',
-    timestamp: new Date(Date.now() - 10 * 60000).toISOString(),
-    vehicle_plate: 'ABJ-882-LK',
-    verified_method: 'pin',
-    notes: 'Solar consultation visit',
-  },
-  {
-    id: 'log-2',
-    pass_code: '719304',
-    visitor_name: 'Jumia Food Dispatch',
-    house_info: 'House 14 (Main House)',
-    direction: 'in',
-    guard_name: 'Officer Ibrahim Bello',
-    timestamp: new Date(Date.now() - 5 * 60000).toISOString(),
-    vehicle_plate: 'KJA-119-ZZ',
-    verified_method: 'qr',
-    notes: 'Hot lunch delivery courier',
-  }
-];
+export const INITIAL_ACCESS_LOGS: AccessLog[] = [];
 
-const PASSES_KEY = 'lighthouse_passes_v1';
-const NOTICES_KEY = 'lighthouse_notices_v1';
-const LOGS_KEY = 'lighthouse_logs_v1';
+const PASSES_KEY = 'lighthouse_passes_v2';
+const NOTICES_KEY = 'lighthouse_notices_v2';
+const LOGS_KEY = 'lighthouse_logs_v2';
 
 export function getStoredPasses(): VisitorPass[] {
   try {

@@ -17,7 +17,6 @@ import { AdminPage } from './pages/AdminPage';
 import { HouseholdHubPage } from './pages/HouseholdHubPage';
 import { StaffOnboardingPage } from './pages/StaffOnboardingPage';
 import { StaffDirectoryPage } from './pages/StaffDirectoryPage';
-import { TownhallPollsPage } from './pages/TownhallPollsPage';
 import { FixItTicketsPage } from './pages/FixItTicketsPage';
 import { MarketplacePage } from './pages/MarketplacePage';
 import { FacilitiesPage } from './pages/FacilitiesPage';
@@ -79,9 +78,6 @@ export default function App() {
         return <GatePage currentUser={currentUser} navigate={navigate} />;
       case '/notices':
         return <NoticesPage currentUser={currentUser} navigate={navigate} />;
-      case '/community/polls':
-      case '/townhall-polls':
-        return <TownhallPollsPage currentUser={currentUser} navigate={navigate} />;
       case '/community/tickets':
       case '/fix-it-tickets':
         return <FixItTicketsPage currentUser={currentUser} navigate={navigate} />;

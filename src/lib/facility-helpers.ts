@@ -3,9 +3,9 @@ import { Facility, FacilityBooking, BookingStatus, HouseUnitType } from '../type
 export const INITIAL_FACILITIES: Facility[] = [
   {
     id: 'fac-kitchen',
-    name: 'Estate Event Kitchen & Banquet Hall',
+    name: 'Estate Kitchen',
     category: 'Culinary & Events',
-    description: 'Fully equipped culinary catering kitchen and attached banquet hall for family feasts, catering prep, and celebratory events.',
+    description: 'Fully equipped culinary catering kitchen and banquet area for family feasts, catering prep, and resident events.',
     capacity: 80,
     location: 'Clubhouse West Wing (Ground Floor)',
     imageUrl: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=800&q=80',
@@ -30,188 +30,12 @@ export const INITIAL_FACILITIES: Facility[] = [
     ],
     hourlyRate: 'Free for Residents (₦15,000 Refundable Deposit)',
     requiresApproval: true,
-  },
-  {
-    id: 'fac-football',
-    name: 'AstroTurf Football Field & Sports Arena',
-    category: 'Sports & Fitness',
-    description: 'High-grade floodlit synthetic pitch suitable for 5-a-side and 7-a-side matches, youth drills, and weekend resident tournaments.',
-    capacity: 30,
-    location: 'North Green Recreational Park',
-    imageUrl: 'https://images.unsplash.com/photo-1575361204480-aadea25e6e68?auto=format&fit=crop&w=800&q=80',
-    operatingHours: '06:30 – 21:30',
-    availableTimeSlots: [
-      '06:30 - 08:30 (Early Morning Match)',
-      '09:00 - 11:00 (Youth Academy)',
-      '16:00 - 18:00 (Afternoon League)',
-      '18:30 - 20:30 (Floodlit Evening Match)'
-    ],
-    features: [
-      'All-Weather Shock-Absorbent Turf',
-      'High-Lumen LED Night Floodlights',
-      'Digital Scoreboard & Timer',
-      'Shaded Team Dugouts & Spectator Benches',
-      'Changing Rooms with Hot Showers'
-    ],
-    rules: [
-      'Turf or rubber studs only; metal cleats strictly prohibited',
-      'Maximum 2 slots per household per weekend',
-      'Estate youth players receive priority on Saturday mornings'
-    ],
-    hourlyRate: 'Complimentary for Residents',
-    requiresApproval: false,
-  },
-  {
-    id: 'fac-mosque',
-    name: 'Mosque Meeting Room & Majlis Hall',
-    category: 'Community & Faith',
-    description: 'Serene, air-conditioned conference and majlis hall designed for study circles, committee deliberations, and community seminars.',
-    capacity: 45,
-    location: 'Al-Noor Community Center (First Floor)',
-    imageUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=800&q=80',
-    operatingHours: '08:00 – 21:00',
-    availableTimeSlots: [
-      '09:00 - 11:30 (Morning Session)',
-      '14:00 - 16:30 (Afternoon Circle)',
-      '17:30 - 20:30 (Evening Majlis)'
-    ],
-    features: [
-      'High-Definition Laser Projector & Screen',
-      'Executive U-Shape & Low-Majlis Cushion Seating',
-      'Wireless Handheld & Lapel Microphones',
-      'Tea, Coffee & Filtered Water Station',
-      'High-Speed Wi-Fi'
-    ],
-    rules: [
-      'Modest attire required at all times',
-      'Audio volume must respect prayer times in the main prayer hall',
-      'Shoes must be placed in dedicated entrance cubbies'
-    ],
-    hourlyRate: 'Complimentary for Residents',
-    requiresApproval: true,
-  },
-  {
-    id: 'fac-tennis',
-    name: 'All-Weather Tennis & Pickleball Court',
-    category: 'Sports & Fitness',
-    description: 'Professional hard court with dual tennis and pickleball markings, perimeter netting, and evening floodlighting.',
-    capacity: 8,
-    location: 'Sports Complex East',
-    imageUrl: 'https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?auto=format&fit=crop&w=800&q=80',
-    operatingHours: '06:30 – 21:30',
-    availableTimeSlots: [
-      '06:30 - 08:30 (Dawn Session)',
-      '09:00 - 11:00 (Morning Practice)',
-      '16:30 - 18:30 (Sunset Session)',
-      '19:00 - 21:00 (Night Floodlight Session)'
-    ],
-    features: [
-      'US Open Regulation Surface Coating',
-      'Automatic Ball Thrower Machine (On Request)',
-      'Perimeter Windbreak Screens',
-      'Shaded Player Rest Pavilion'
-    ],
-    rules: [
-      'Non-marking court shoes compulsory',
-      '1-hour limit if other residents are waiting without prior reservation'
-    ],
-    hourlyRate: 'Complimentary for Residents',
-    requiresApproval: false,
-  },
-  {
-    id: 'fac-pavilion',
-    name: 'Central Garden Pergola & BBQ Pavilion',
-    category: 'Outdoor & Leisure',
-    description: 'Covered outdoor garden sanctuary surrounded by lush landscaping, fitted with built-in grills for family barbecues and picnics.',
-    capacity: 50,
-    location: 'Central Garden Promenade',
-    imageUrl: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=800&q=80',
-    operatingHours: '09:00 – 22:00',
-    availableTimeSlots: [
-      '10:00 - 13:30 (Lunch BBQ & Picnic)',
-      '14:30 - 18:00 (Afternoon Gathering)',
-      '18:30 - 21:30 (Evening Sunset Grill)'
-    ],
-    features: [
-      'Stainless Steel Charcoal & Gas Grill Pits',
-      'Heavy-duty Teak Picnic Tables & Benches',
-      'Warm Ambient Fairy Lighting',
-      'Outdoor Sink & Preparation Counter',
-      'Adjoining Lawn for Children'
-    ],
-    rules: [
-      'Charcoal coals must be safely extinguished with provided sand bucket',
-      'Amplified music strictly forbidden after 21:30',
-      'Carry-in / carry-out clean lawn policy'
-    ],
-    hourlyRate: 'Complimentary for Residents',
-    requiresApproval: false,
   }
 ];
 
-const STORAGE_KEY_BOOKINGS = 'lighthouse_facility_bookings_v1';
+const STORAGE_KEY_BOOKINGS = 'lighthouse_facility_bookings_v2';
 
-const SAMPLE_BOOKINGS: FacilityBooking[] = [
-  {
-    id: 'bk-101',
-    facility_id: 'fac-kitchen',
-    facility_name: 'Estate Event Kitchen & Banquet Hall',
-    resident_id: 'user-res-1',
-    resident_name: 'Dr. Tariq Al-Mansoor',
-    resident_phone: '+234 803 123 4567',
-    house_number: 14,
-    house_unit: 'Main House',
-    booking_date: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0], // 2 days ahead
-    time_slot: '12:30 - 16:30 (Afternoon Banquet)',
-    start_time: '12:30',
-    end_time: '16:30',
-    event_title: 'Family Eid Reunion & Lunch',
-    purpose: 'Family celebration with extended family visiting the estate.',
-    guest_count: 35,
-    status: 'confirmed',
-    special_requests: 'Request access to warming trays and extra dining chairs.',
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-    admin_notes: 'Approved by Estate Admin. Deposit verified.'
-  },
-  {
-    id: 'bk-102',
-    facility_id: 'fac-football',
-    facility_name: 'AstroTurf Football Field & Sports Arena',
-    resident_id: 'user-res-2',
-    resident_name: 'Engr. Mustapha Bello',
-    resident_phone: '+234 802 345 6789',
-    house_number: 22,
-    house_unit: 'Main House',
-    booking_date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // tomorrow
-    time_slot: '18:30 - 20:30 (Floodlit Evening Match)',
-    start_time: '18:30',
-    end_time: '20:30',
-    event_title: 'Weekly Resident Friendly Derby',
-    purpose: 'House 20s vs House 30s friendly sports evening.',
-    guest_count: 16,
-    status: 'confirmed',
-    created_at: new Date(Date.now() - 43200000).toISOString()
-  },
-  {
-    id: 'bk-103',
-    facility_id: 'fac-mosque',
-    facility_name: 'Mosque Meeting Room & Majlis Hall',
-    resident_id: 'user-res-1',
-    resident_name: 'Dr. Tariq Al-Mansoor',
-    resident_phone: '+234 803 123 4567',
-    house_number: 14,
-    house_unit: 'Main House',
-    booking_date: new Date(Date.now() + 86400000 * 5).toISOString().split('T')[0],
-    time_slot: '17:30 - 20:30 (Evening Majlis)',
-    start_time: '17:30',
-    end_time: '20:30',
-    event_title: 'Quarterly Madrasa Curriculum Committee',
-    purpose: 'Review of term syllabus and youth Quran memorization competition.',
-    guest_count: 18,
-    status: 'pending',
-    created_at: new Date().toISOString()
-  }
-];
+const SAMPLE_BOOKINGS: FacilityBooking[] = [];
 
 export function getStoredBookings(): FacilityBooking[] {
   try {

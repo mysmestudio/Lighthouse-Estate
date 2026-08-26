@@ -455,7 +455,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                         <option value="Main house">Main house</option>
                         <option value="Ground floor flat">Ground floor flat</option>
                         <option value="Upper floor flat">Upper floor flat</option>
-                        <option value="Guest chalet">Guest chalet</option>
                         <option value="Boys' quarters (BQ)">Boys' quarters (BQ)</option>
                       </select>
                     </div>

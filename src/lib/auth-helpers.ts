@@ -137,91 +137,11 @@ export function validateResidentPin(pin: string): {
   };
 }
 
-// Initial demo users for instant preview and testing
-export const INITIAL_DEMO_USERS: AppUser[] = [
-  {
-    id: 'user-res-1',
-    auth_user_id: 'auth-res-1',
-    role: 'resident',
-    full_name: 'Dr. Tariq Al-Mansoor',
-    phone: '+234 803 123 4567',
-    email: 'tariq.mansoor@example.com',
-    house_number: 14,
-    house_unit: 'Main House',
-    pin_hash: hashPin('1A2B3C'),
-    status: 'active',
-    dues_status: 'up_to_date',
-    created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
-    approved_by: 'Admin Office',
-    approved_at: new Date(Date.now() - 29 * 86400000).toISOString(),
-  },
-  {
-    id: 'user-sec-1',
-    auth_user_id: 'auth-sec-1',
-    role: 'security',
-    full_name: 'Officer Ibrahim Bello',
-    phone: '+234 802 987 6543',
-    email: 'security.gate@lighthouseestate.org',
-    house_number: 1,
-    house_unit: 'Main House',
-    status: 'active',
-    created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
-  },
-  {
-    id: 'user-staff-1',
-    auth_user_id: 'auth-staff-1',
-    role: 'staff',
-    full_name: 'Fatima Suleiman',
-    phone: '+234 806 555 7890',
-    email: 'fatima.s@example.com',
-    house_number: 14,
-    house_unit: 'BQ',
-    status: 'active',
-    employer_id: 'user-res-1',
-    created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
-  },
-  {
-    id: 'user-adm-1',
-    auth_user_id: 'auth-adm-1',
-    role: 'admin',
-    full_name: 'Alhaji Usman Danjuma',
-    phone: '+234 809 111 2233',
-    email: 'admin@lighthouseestate.org',
-    house_number: 1,
-    house_unit: 'Main House',
-    status: 'active',
-    created_at: new Date(Date.now() - 100 * 86400000).toISOString(),
-  },
-  {
-    id: 'user-madr-1',
-    auth_user_id: 'auth-madr-1',
-    role: 'madrasa_admin',
-    full_name: 'Ustadh Zayd Harun',
-    phone: '+234 805 444 3322',
-    email: 'madrasa@lighthouseestate.org',
-    house_number: 5,
-    house_unit: 'Ground Floor',
-    status: 'active',
-    created_at: new Date(Date.now() - 90 * 86400000).toISOString(),
-  },
-  {
-    id: 'user-pending-1',
-    auth_user_id: 'auth-pending-1',
-    role: 'resident',
-    full_name: 'Hajiya Maryam Sadiq',
-    phone: '+234 807 888 9900',
-    email: 'maryam.sadiq@example.com',
-    house_number: 28,
-    house_unit: 'First Floor',
-    pin_hash: hashPin('4D5E6F'),
-    status: 'pending',
-    dues_status: 'exempt',
-    created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
-  }
-];
+// Initial demo users - Clean for production
+export const INITIAL_DEMO_USERS: AppUser[] = [];
 
-const LOCAL_STORAGE_USERS_KEY = 'lighthouse_app_users_v1';
-const LOCAL_STORAGE_CURRENT_USER_KEY = 'lighthouse_current_user_v1';
+const LOCAL_STORAGE_USERS_KEY = 'lighthouse_app_users_v2';
+const LOCAL_STORAGE_CURRENT_USER_KEY = 'lighthouse_current_user_v2';
 
 export function getStoredAppUsers(): AppUser[] {
   try {
@@ -352,109 +272,94 @@ export async function authenticateEstateUser(
 
   if (role === 'admin' || role === 'master_admin' || role === 'madrasa_admin') {
     const searchEmail = (params.email || '').toLowerCase().trim();
+    if (!searchEmail) {
+      return { user: null, error: 'Please enter your administrator email.' };
+    }
     matchedUser = allUsers.find(
       (u) =>
-        (u.role === role || (role === 'admin' && (u.role === 'admin' || u.role === 'master_admin'))) &&
-        (u.email.toLowerCase() === searchEmail || searchEmail === 'admin@lighthouseestate.org' || searchEmail === 'madrasa@lighthouseestate.org')
+        (u.role === 'admin' || u.role === 'master_admin' || u.role === 'madrasa_admin') &&
+        u.email.toLowerCase() === searchEmail
     );
 
     if (!matchedUser) {
-      // Fallback to default admin for any entered admin email/pass
-      matchedUser = allUsers.find((u) => u.role === 'admin' || u.role === 'master_admin') || {
-        id: 'user-adm-1',
-        auth_user_id: 'auth-adm-1',
-        role: 'admin',
-        full_name: 'Alhaji Usman Danjuma',
-        phone: '+234 809 111 2233',
-        email: params.email || 'admin@lighthouseestate.org',
-        house_number: 1,
-        house_unit: 'Main House',
-        status: 'active',
-        created_at: new Date().toISOString(),
-      };
+      return { user: null, error: 'No administrator account found for this email address.' };
+    }
+
+    if (matchedUser.status !== 'active') {
+      return { user: null, error: `Account is currently ${matchedUser.status}. Please contact estate governance.` };
     }
   } else if (role === 'security') {
-    // Security matches gate officer
-    matchedUser = allUsers.find((u) => u.role === 'security') || {
-      id: 'user-sec-1',
-      auth_user_id: 'auth-sec-1',
-      role: 'security',
-      full_name: 'Officer Ibrahim Bello',
-      phone: '+234 802 987 6543',
-      email: 'security.gate@lighthouseestate.org',
-      house_number: 1,
-      house_unit: 'Main House',
-      status: 'active',
-      created_at: new Date().toISOString(),
-    };
-  } else if (role === 'staff') {
-    const hNum = Number(params.houseNumber) || 14;
-    const hUnit = params.houseUnit || 'BQ';
+    const searchEmail = (params.email || '').toLowerCase().trim();
+    const hNum = Number(params.houseNumber);
     matchedUser = allUsers.find(
-      (u) => u.role === 'staff' && u.house_number === hNum && u.house_unit === hUnit
+      (u) => u.role === 'security' && (
+        (searchEmail && u.email?.toLowerCase() === searchEmail) || 
+        (hNum && u.house_number === hNum)
+      )
     );
 
     if (!matchedUser) {
-      // Auto-provision staff for this house
-      matchedUser = {
-        id: `user-staff-${hNum}-${Date.now()}`,
-        auth_user_id: `auth-staff-${hNum}`,
-        role: 'staff',
-        full_name: `Household Staff (House ${hNum})`,
-        phone: '+234 806 555 7890',
-        email: `staff.h${hNum}@residents.lighthouseestate.app`,
-        house_number: hNum,
-        house_unit: hUnit,
-        pin_hash: hashPin(inputPin || '9482AB'),
-        status: 'active',
-        created_at: new Date().toISOString(),
-      };
-      allUsers.push(matchedUser);
-      saveAppUsers(allUsers);
+      return { user: null, error: 'No security officer account found. Please check your credentials.' };
+    }
+
+    if (matchedUser.status !== 'active') {
+      return { user: null, error: `Security officer account is currently ${matchedUser.status}.` };
+    }
+  } else if (role === 'staff') {
+    const hNum = Number(params.houseNumber);
+    const hUnit = params.houseUnit || 'Main House';
+    
+    if (!hNum) {
+      return { user: null, error: 'Please enter a valid house number.' };
+    }
+
+    matchedUser = allUsers.find(
+      (u) => u.role === 'staff' && u.house_number === hNum && (u.house_unit === hUnit || u.house_unit.toLowerCase() === hUnit.toLowerCase())
+    );
+
+    if (!matchedUser) {
+      return { user: null, error: `No staff account registered for House ${hNum} (${hUnit}). Please complete onboarding first.` };
+    }
+
+    if (matchedUser.status !== 'active') {
+      return { user: null, error: `Staff account is currently ${matchedUser.status}. Please contact your resident employer.` };
+    }
+
+    if (inputPin) {
+      const isPinValid = (matchedUser.pin_hash && verifyPin(inputPin, matchedUser.pin_hash)) || matchedUser.pin === inputPin;
+      if (!isPinValid) {
+        return { user: null, error: 'Invalid PIN. Please enter your valid staff PIN.' };
+      }
     }
   } else {
     // Resident
-    const hNum = Number(params.houseNumber) || 14;
+    const hNum = Number(params.houseNumber);
     const hUnit = params.houseUnit || 'Main House';
 
+    if (!hNum) {
+      return { user: null, error: 'Please enter your house number.' };
+    }
+
     matchedUser = allUsers.find(
-      (u) => u.role === 'resident' && u.house_number === hNum && u.house_unit === hUnit
+      (u) => u.role === 'resident' && u.house_number === hNum && (u.house_unit === hUnit || u.house_unit.toLowerCase() === hUnit.toLowerCase())
     );
 
     if (!matchedUser) {
-      // Auto-provision active resident for this house unit so login never fails
-      matchedUser = {
-        id: `user-res-${hNum}-${Date.now()}`,
-        auth_user_id: `auth-res-${hNum}`,
-        role: 'resident',
-        full_name: `Resident House ${hNum}`,
-        phone: '+234 803 123 4567',
-        email: `resident.h${hNum}@residents.lighthouseestate.app`,
-        house_number: hNum,
-        house_unit: hUnit,
-        pin_hash: hashPin(inputPin || '1A2B3C'),
-        status: 'active',
-        dues_status: 'up_to_date',
-        created_at: new Date().toISOString(),
-      };
-      allUsers.push(matchedUser);
-      saveAppUsers(allUsers);
-    } else {
-      // If user exists, verify PIN if pin_hash is present
-      if (matchedUser.pin_hash && inputPin) {
-        const isPinValid = 
-          verifyPin(inputPin, matchedUser.pin_hash) || 
-          inputPin === '1A2B3C' || 
-          inputPin.length === 6;
+      return { user: null, error: `No resident account registered for House ${hNum} (${hUnit}). Please submit a registration first.` };
+    }
 
-        if (!isPinValid) {
-          return { user: null, error: 'Invalid PIN. Please enter your 6-character access PIN.' };
-        }
-      }
-      // If found user was pending in demo, activate them upon verified login
-      if (matchedUser.status === 'pending') {
-        matchedUser.status = 'active';
-        saveAppUsers(allUsers);
+    if (matchedUser.status === 'pending') {
+      return { user: null, error: 'Your registration is pending review by the estate office. You will be able to log in once approved.' };
+    }
+
+    if (matchedUser.status !== 'active') {
+      return { user: null, error: `Your resident account is currently ${matchedUser.status}. Please contact the estate office.` };
+    }
+
+    if (inputPin) {
+      const isPinValid = (matchedUser.pin_hash && verifyPin(inputPin, matchedUser.pin_hash)) || matchedUser.pin === inputPin;
+      if (!isPinValid) {
+        return { user: null, error: 'Invalid PIN. Please check your 6-character access PIN.' };
       }
     }
   }
@@ -648,25 +553,10 @@ export function resetResidentPinSelfServe(params: {
     targetUser.pin = newPin;
     users[userIdx] = targetUser;
   } else {
-    // Create / provision active resident with new PIN
-    targetUser = {
-      id: `user-res-h${houseNumber}-${Date.now()}`,
-      auth_user_id: `auth-res-h${houseNumber}`,
-      role: 'resident',
-      full_name: `Resident House ${houseNumber}`,
-      phone: contact.includes('@') ? '+234 803 000 0000' : contact,
-      email: contact.includes('@') ? contact : `resident.h${houseNumber}@lighthouseestate.app`,
-      house_number: houseNumber,
-      house_unit: houseUnit,
-      pin_hash: hashPin(newPin),
-      pin: newPin,
-      status: 'active',
-      dues_status: 'up_to_date',
-      created_at: new Date().toISOString(),
-      approved_by: 'Self-Serve Reset',
-      approved_at: new Date().toISOString(),
+    return {
+      success: false,
+      error: `No registered resident account found for House ${houseNumber} (${houseUnit}). Please submit a registration first.`,
     };
-    users.push(targetUser);
   }
 
   saveAppUsers(users);

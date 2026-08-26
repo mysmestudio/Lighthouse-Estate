@@ -13,7 +13,6 @@ import {
   Home, 
   Compass,
   Download,
-  Vote,
   Wrench,
   ShoppingBag,
   ChevronDown,
@@ -196,19 +195,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
                 {communityDropdownOpen && (
                   <div className="absolute top-full mt-1.5 left-0 w-60 rounded-xl bg-white border border-[#E4D9BE] shadow-xl p-1.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150 space-y-0.5">
-                    <button
-                      onClick={() => handleNav('/community/polls')}
-                      className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2.5 transition-colors ${
-                        currentPath === '/community/polls' ? 'bg-[#F2EAD9] text-[#0A2F1C]' : 'text-[#10241A] hover:bg-[#FBF8F1]'
-                      }`}
-                    >
-                      <Vote className="w-4 h-4 text-[#C89B3C]" />
-                      <div>
-                        <p className="font-semibold text-xs text-[#0A2F1C]">Townhall Polls</p>
-                        <p className="text-[10px] text-[#10241A]/50 font-normal">Vote on estate decisions</p>
-                      </div>
-                    </button>
-
                     <button
                       onClick={() => handleNav('/community/tickets')}
                       className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2.5 transition-colors ${
@@ -509,16 +495,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <p className="px-3 pb-1 text-[10px] uppercase font-bold tracking-widest text-[#0A2F1C]/50">
                   Community Hub
                 </p>
-                <button
-                  onClick={() => handleNav('/community/polls')}
-                  className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium flex items-center gap-2.5 ${
-                    currentPath === '/community/polls' ? 'bg-[#F2EAD9] text-[#0A2F1C] font-bold' : 'text-[#10241A] hover:bg-[#F2EAD9]'
-                  }`}
-                >
-                  <Vote className="w-3.5 h-3.5 text-[#C89B3C]" />
-                  <span>Townhall Polls</span>
-                </button>
-
                 <button
                   onClick={() => handleNav('/community/tickets')}
                   className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium flex items-center gap-2.5 ${

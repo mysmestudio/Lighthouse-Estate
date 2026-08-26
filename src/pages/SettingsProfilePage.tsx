@@ -646,10 +646,10 @@ export const SettingsProfilePage: React.FC<SettingsProfilePageProps> = ({
                 <label className="flex items-center justify-between p-3 rounded-xl bg-[#FBFDF9] border border-[#E3EFE7] cursor-pointer hover:border-[#3FAE7A]/40 transition-colors">
                   <div>
                     <span className="font-['Sora'] font-bold text-xs text-[#16241D] block">
-                      Estate Notices & Townhall Alerts
+                      Estate Notices & Broadcasts
                     </span>
                     <span className="text-[11px] text-[#8AA096]">
-                      Important security broadcasts, facility maintenance, and voting ballots
+                      Important security broadcasts, facility maintenance, and administrative updates
                     </span>
                   </div>
                   <input

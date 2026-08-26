@@ -68,38 +68,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentUser, navigate }) =
   const [activeDock, setActiveDock] = useState<'home' | 'approvals' | 'dues' | 'logs' | 'notices'>('home');
 
   // Approvals State
-  const [approvals, setApprovals] = useState<ApprovalItem[]>([
-    {
-      id: 'appr-1',
-      name: 'Ngozi Eze',
-      initials: 'NE',
-      house: 61,
-      unit: 'Main House',
-      submitted: 'submitted 2h ago',
-      status: 'pending',
-      role: 'resident'
-    },
-    {
-      id: 'appr-2',
-      name: 'David Okonkwo',
-      initials: 'DO',
-      house: 23,
-      unit: 'Main House',
-      submitted: 'submitted 5h ago',
-      status: 'pending',
-      role: 'resident'
-    },
-    {
-      id: 'appr-3',
-      name: 'Fatima Bello',
-      initials: 'FB',
-      house: 88,
-      unit: 'Main House',
-      submitted: 'submitted yesterday',
-      status: 'pending',
-      role: 'staff'
-    }
-  ]);
+  const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
 
   // Today's Hadith
   const todayHadith = HADITHS[new Date().getDate() % HADITHS.length];
@@ -916,7 +885,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentUser, navigate }) =
               </div>
               <div className="p-3 rounded-xl bg-[#FBFDF9] border border-[#E3EFE7] flex justify-between items-center text-[12.5px]">
                 <div>
-                  <span className="font-bold text-[#16241D]">House 55</span> &middot; Guest Chalet
+                  <span className="font-bold text-[#16241D]">House 55</span> &middot; Boys' quarters (BQ)
                   <div className="text-[11px] text-[#8AA096]">Payment plan active (Due Sept 15)</div>
                 </div>
                 <span className="px-2 py-0.5 rounded-full bg-[#FBF3D9] text-[#B4922C] text-[10.5px] font-bold">Deferred</span>

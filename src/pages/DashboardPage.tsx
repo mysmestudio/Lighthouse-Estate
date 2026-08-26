@@ -6,7 +6,6 @@ import {
   QrCode, 
   Share2, 
   Calendar,
-  Vote,
   Wrench,
   ShoppingBag,
   Bell,
@@ -93,7 +92,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navig
   const sosTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Active dock tab
-  const [activeDock, setActiveDock] = useState<'home' | 'passes' | 'facilities' | 'staff' | 'community'>('home');
+  const [activeDock, setActiveDock] = useState<'home' | 'passes' | 'facilities' | 'staff' | 'notices'>('home');
 
   // Daily Hadith selection
   const todayHadith = useMemo(() => {
@@ -424,97 +423,151 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navig
             </div>
           </section>
 
-          {/* Section 2: Quick Actions Grid */}
+          {/* Section 2: Estate Services Grid (Replacing quick actions row) */}
           <section className="mb-7">
-            <div className="grid grid-cols-4 gap-2.5">
+            <div className="flex justify-between items-baseline mb-3">
+              <h2 className="font-['Sora',sans-serif] font-bold text-[15.5px] text-[#16241D]">
+                Estate services
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
               <button
                 type="button"
                 onClick={() => setIsPassModalOpen(true)}
-                className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 text-center transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group flex flex-col items-center justify-center"
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
               >
-                <div className="w-[38px] h-[38px] rounded-[11px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
-                  <svg className="w-5 h-5 stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                <div className="w-8 h-8 rounded-[9px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
+                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
                     <circle cx="7.5" cy="7.5" r="3.2" />
                     <line x1="9.8" y1="9.8" x2="19" y2="19" />
                     <line x1="15" y1="15" x2="17" y2="13" />
                   </svg>
                 </div>
-                <span className="text-[11.5px] font-bold text-[#16241D] block leading-tight">
+                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
                   Issue pass
-                </span>
+                </h3>
+                <p className="text-[11.5px] text-[#8AA096] leading-tight">
+                  Visitor access codes
+                </p>
               </button>
 
               <button
                 type="button"
                 onClick={() => navigate('/facilities')}
-                className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 text-center transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group flex flex-col items-center justify-center"
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
               >
-                <div className="w-[38px] h-[38px] rounded-[11px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
-                  <svg className="w-5 h-5 stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                <div className="w-8 h-8 rounded-[9px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
+                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
                     <rect x="3" y="5" width="18" height="16" rx="2" />
                     <line x1="3" y1="10" x2="21" y2="10" />
-                    <line x1="7" y1="3" x2="7" y2="7" />
-                    <line x1="17" y1="3" x2="17" y2="7" />
                   </svg>
                 </div>
-                <span className="text-[11.5px] font-bold text-[#16241D] block leading-tight">
+                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
                   Book facility
-                </span>
+                </h3>
+                <p className="text-[11.5px] text-[#8AA096] leading-tight">
+                  Estate Kitchen reservation
+                </p>
               </button>
 
               <button
                 type="button"
                 onClick={() => navigate('/fix-it-tickets')}
-                className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 text-center transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group flex flex-col items-center justify-center"
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
               >
-                <div className="w-[38px] h-[38px] rounded-[11px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
-                  <svg className="w-5 h-5 stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                <div className="w-8 h-8 rounded-[9px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
+                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
                     <path d="M14.7 6.3a3 3 0 10-4.24 4.24L4 17v3h3l6.5-6.46a3 3 0 004.2-4.24z" />
                   </svg>
                 </div>
-                <span className="text-[11.5px] font-bold text-[#16241D] block leading-tight">
+                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
                   Report fault
-                </span>
+                </h3>
+                <p className="text-[11.5px] text-[#8AA096] leading-tight">
+                  Maintenance tickets
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/household')}
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
+              >
+                <div className="w-8 h-8 rounded-[9px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
+                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                    <circle cx="9" cy="8" r="3" />
+                    <path d="M4 20c0-3 2.5-5 5-5s5 2 5 5" />
+                    <circle cx="17" cy="9" r="2.3" />
+                    <path d="M15 20c0-2.4 1-4 3.5-4.3" />
+                  </svg>
+                </div>
+                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
+                  Domestic staff
+                </h3>
+                <p className="text-[11.5px] text-[#8AA096] leading-tight">
+                  Staff KYC &amp; registry
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/marketplace')}
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
+              >
+                <div className="w-8 h-8 rounded-[9px] bg-[#FBF3D9] text-[#B4922C] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
+                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                    <path d="M6 8h12l-1 12H7L6 8z" />
+                    <path d="M9 8V6a3 3 0 016 0v2" />
+                  </svg>
+                </div>
+                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
+                  Marketplace
+                </h3>
+                <p className="text-[11.5px] text-[#8AA096] leading-tight">
+                  Resident classifieds
+                </p>
               </button>
 
               <button
                 type="button"
                 onClick={() => navigate('/notices')}
-                className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 text-center transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group flex flex-col items-center justify-center"
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
               >
-                <div className="w-[38px] h-[38px] rounded-[11px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
-                  <svg className="w-5 h-5 stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                <div className="w-8 h-8 rounded-[9px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
+                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
                     <path d="M6 8a6 6 0 1112 0c0 4 1.5 6 2 6H4c0.5 0 2-2 2-6z" />
                     <path d="M10 20a2 2 0 004 0" />
                   </svg>
                 </div>
-                <span className="text-[11.5px] font-bold text-[#16241D] block leading-tight">
+                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
                   Notice board
-                </span>
+                </h3>
+                <p className="text-[11.5px] text-[#8AA096] leading-tight">
+                  Estate broadcasts
+                </p>
               </button>
             </div>
           </section>
 
-          {/* Section 3: 2-Column Grid (Active passes & Activity Console) */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
-            
-            {/* Left: Active Passes */}
-            <div className="md:col-span-7 space-y-2.5">
-              <div className="flex justify-between items-baseline mb-3">
-                <h2 className="font-['Sora',sans-serif] font-bold text-[15.5px] text-[#16241D]">
-                  Active visitor passes
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => navigate('/passes')}
-                  className="text-[12.5px] font-bold text-[#257A54] hover:underline cursor-pointer"
-                >
-                  All passes &rarr;
-                </button>
-              </div>
+          {/* Section 3: Active visitor passes */}
+          <section className="mb-7">
+            <div className="flex justify-between items-baseline mb-3">
+              <h2 className="font-['Sora',sans-serif] font-bold text-[15.5px] text-[#16241D]">
+                Active visitor passes
+              </h2>
+              <button
+                type="button"
+                onClick={() => navigate('/passes')}
+                className="text-[12.5px] font-bold text-[#257A54] hover:underline cursor-pointer"
+              >
+                All passes &rarr;
+              </button>
+            </div>
 
-              {activePassesList.length > 0 ? (
-                activePassesList.map((pass) => (
+            {activePassesList.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {activePassesList.map((pass) => (
                   <div 
                     key={pass.id}
                     className="bg-white border border-[#E3EFE7] rounded-2xl py-3.5 px-4 flex items-center gap-3 transition-all hover:border-[#3FAE7A] shadow-xs"
@@ -564,183 +617,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navig
                       )}
                     </button>
                   </div>
-                ))
-              ) : (
-                <div className="bg-white border border-[#E3EFE7] rounded-2xl p-6 text-center text-[12.5px] text-[#8AA096]">
-                  No active passes currently.
-                </div>
-              )}
-            </div>
-
-            {/* Right: Activity Console */}
-            <div className="md:col-span-5 space-y-2.5">
-              <div className="flex justify-between items-baseline mb-3">
-                <h2 className="font-['Sora',sans-serif] font-bold text-[15.5px] text-[#16241D]">
-                  Recent activity
-                </h2>
+                ))}
               </div>
-
-              <div className="bg-[#0D1F17] rounded-[20px] p-4.5 text-white shadow-md">
-                <div className="flex justify-between items-center mb-3">
-                  <span className="flex items-center gap-2 font-['Sora',sans-serif] text-[12px] font-bold text-white/70">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] shadow-[0_0_0_3px_rgba(74,222,128,0.25)] animate-[pulse_1.6s_ease-in-out_infinite]" />
-                    House {currentUser?.house_number || 14}
-                  </span>
-                  <span className="font-['Sora',sans-serif] text-[10px] font-extrabold tracking-[0.06em] text-[#4ADE80] bg-[#4ADE80]/[0.12] py-0.5 px-2 rounded-full">
-                    Live
-                  </span>
-                </div>
-
-                <div 
-                  className="h-[112px] overflow-hidden relative"
-                  style={{
-                    WebkitMaskImage: 'linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent)',
-                    maskImage: 'linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent)'
-                  }}
-                >
-                  <div className="absolute w-full animate-[scrollUp_14s_linear_infinite]">
-                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
-                      <span className="text-white/40 shrink-0 w-16">09:41</span>
-                      <span className="text-white font-semibold">Guest LH-8291 verified &middot; Gate 1</span>
-                    </div>
-                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
-                      <span className="text-white/40 shrink-0 w-16">08:15</span>
-                      <span className="text-white font-semibold">Staff PIN used &middot; Gate 2</span>
-                    </div>
-                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
-                      <span className="text-white/40 shrink-0 w-16">Yesterday</span>
-                      <span className="text-white font-semibold">You issued a delivery pass</span>
-                    </div>
-                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
-                      <span className="text-white/40 shrink-0 w-16">Yesterday</span>
-                      <span className="text-white font-semibold">Guest departed &middot; Gate 1</span>
-                    </div>
-                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
-                      <span className="text-white/40 shrink-0 w-16">09:41</span>
-                      <span className="text-white font-semibold">Guest LH-8291 verified &middot; Gate 1</span>
-                    </div>
-                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
-                      <span className="text-white/40 shrink-0 w-16">08:15</span>
-                      <span className="text-white font-semibold">Staff PIN used &middot; Gate 2</span>
-                    </div>
-                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
-                      <span className="text-white/40 shrink-0 w-16">Yesterday</span>
-                      <span className="text-white font-semibold">You issued a delivery pass</span>
-                    </div>
-                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
-                      <span className="text-white/40 shrink-0 w-16">Yesterday</span>
-                      <span className="text-white font-semibold">Guest departed &middot; Gate 1</span>
-                    </div>
-                  </div>
-                </div>
+            ) : (
+              <div className="bg-white border border-[#E3EFE7] rounded-2xl p-6 text-center text-[12.5px] text-[#8AA096]">
+                No active passes currently.
               </div>
-            </div>
-          </div>
-
-          {/* Section 4: Estate Services Grid */}
-          <section className="mb-7">
-            <div className="flex justify-between items-baseline mb-3">
-              <h2 className="font-['Sora',sans-serif] font-bold text-[15.5px] text-[#16241D]">
-                Estate services
-              </h2>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
-              <button
-                type="button"
-                onClick={() => navigate('/facilities')}
-                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
-              >
-                <div className="w-8 h-8 rounded-[9px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
-                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
-                    <rect x="3" y="5" width="18" height="16" rx="2" />
-                    <line x1="3" y1="10" x2="21" y2="10" />
-                  </svg>
-                </div>
-                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
-                  Facility booking
-                </h3>
-                <p className="text-[11.5px] text-[#8AA096] leading-tight">
-                  Pitch, mosque hall, kitchen
-                </p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate('/townhall-polls')}
-                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
-              >
-                <div className="w-8 h-8 rounded-[9px] bg-[#FBF3D9] text-[#B4922C] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
-                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
-                    <line x1="6" y1="20" x2="6" y2="10" />
-                    <line x1="12" y1="20" x2="12" y2="4" />
-                    <line x1="18" y1="20" x2="18" y2="14" />
-                  </svg>
-                </div>
-                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
-                  Townhall polls
-                </h3>
-                <p className="text-[11.5px] text-[#8AA096] leading-tight">
-                  Vote on estate decisions
-                </p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate('/fix-it-tickets')}
-                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
-              >
-                <div className="w-8 h-8 rounded-[9px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
-                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
-                    <path d="M14.7 6.3a3 3 0 10-4.24 4.24L4 17v3h3l6.5-6.46a3 3 0 004.2-4.24z" />
-                  </svg>
-                </div>
-                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
-                  Fix-it tickets
-                </h3>
-                <p className="text-[11.5px] text-[#8AA096] leading-tight">
-                  Report &amp; track maintenance
-                </p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate('/marketplace')}
-                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
-              >
-                <div className="w-8 h-8 rounded-[9px] bg-[#FBF3D9] text-[#B4922C] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
-                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
-                    <path d="M6 8h12l-1 12H7L6 8z" />
-                    <path d="M9 8V6a3 3 0 016 0v2" />
-                  </svg>
-                </div>
-                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
-                  Marketplace
-                </h3>
-                <p className="text-[11.5px] text-[#8AA096] leading-tight">
-                  Neighbour classifieds
-                </p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate('/settings')}
-                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group col-span-2 sm:col-span-1"
-              >
-                <div className="w-8 h-8 rounded-[9px] bg-[#E8C547]/20 text-[#8C6D1F] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
-                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
-                    <circle cx="12" cy="8" r="4" />
-                    <path d="M6 21v-2a4 4 0 014-4h4a4 4 0 014 4v2" />
-                  </svg>
-                </div>
-                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
-                  Profile &amp; House
-                </h3>
-                <p className="text-[11.5px] text-[#8AA096] leading-tight">
-                  Unit type, plates, contacts
-                </p>
-              </button>
-            </div>
+            )}
           </section>
 
           {/* Section 5: Notice Board */}
@@ -916,19 +799,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navig
 
         <button
           type="button"
-          onClick={() => { setActiveDock('community'); navigate('/townhall-polls'); }}
-          aria-label="Community"
+          onClick={() => { setActiveDock('notices'); navigate('/notices'); }}
+          aria-label="Notices"
           className={`w-[50px] h-[46px] rounded-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all ${
-            activeDock === 'community' 
+            activeDock === 'notices' 
               ? 'bg-white/[0.12] text-[#E8C547]' 
               : 'text-white/55 hover:text-white'
           }`}
         >
           <svg className="w-[19px] h-[19px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
-            <circle cx="12" cy="8" r="3.2" />
-            <path d="M5 20c0-4 3-6 7-6s7 2 7 6" />
+            <path d="M6 8a6 6 0 1112 0c0 4 1.5 6 2 6H4c0.5 0 2-2 2-6z" />
+            <path d="M10 20a2 2 0 004 0" />
           </svg>
-          <span className="text-[9px] font-bold">Community</span>
+          <span className="text-[9px] font-bold">Notices</span>
         </button>
       </nav>
 
