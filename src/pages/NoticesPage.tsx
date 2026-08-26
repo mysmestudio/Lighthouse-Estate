@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   Bell,
   ShieldAlert,
@@ -7,7 +7,6 @@ import {
   Clock,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
   Pin,
   Flame,
   ArrowRight,
@@ -15,6 +14,7 @@ import {
 } from 'lucide-react';
 import { EstateNotice, AppUser, NoticeType } from '../types';
 import { getStoredNotices } from '../lib/estate-data';
+import { triggerSOSEvent } from '../lib/sos-service';
 
 interface NoticesPageProps {
   currentUser: AppUser | null;
@@ -22,15 +22,23 @@ interface NoticesPageProps {
 }
 
 const ITEMS_PER_PAGE = 6;
+const SOS_RING_LENGTH = 194.8;
+const SOS_HOLD_MS = 5000;
 
 export const NoticesPage: React.FC<NoticesPageProps> = ({ currentUser, navigate }) => {
   const [notices] = useState<EstateNotice[]>(() => getStoredNotices());
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'emergency' | 'event' | 'info'>('all');
   const [currentPage, setCurrentPage] = useState<number>(1);
 
+  // SOS state
+  const [isHoldingSOS, setIsHoldingSOS] = useState(false);
+  const [sosActivated, setSosActivated] = useState(false);
+  const [showSosToast, setShowSosToast] = useState(false);
+  const [sosProgressOffset, setSosProgressOffset] = useState(SOS_RING_LENGTH);
+  const [sosTransition, setSosTransition] = useState<string>('none');
+  const sosTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // Sorting & Pinning logic:
-  // 1. Emergency notices (type === 'emergency' or priority === 'emergency' or priority === 'urgent') are pinned to the top regardless of date.
-  // 2. Non-emergency notices follow in reverse-chronological order (newest first).
   const sortedAndFilteredNotices = useMemo(() => {
     const isEmergency = (n: EstateNotice) =>
       n.type === 'emergency' ||
@@ -74,258 +82,391 @@ export const NoticesPage: React.FC<NoticesPageProps> = ({ currentUser, navigate 
     (n) => (n.type === 'info' || n.category === 'info' || (!n.type && n.category !== 'event' && n.category !== 'emergency'))
   ).length;
 
+  // SOS Press & Hold
+  const handleSOSStart = (e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
+    if (sosActivated) return;
+
+    setIsHoldingSOS(true);
+    setSosTransition(`stroke-dashoffset ${SOS_HOLD_MS / 1000}s linear`);
+    setSosProgressOffset(0);
+
+    sosTimerRef.current = setTimeout(async () => {
+      setSosActivated(true);
+      setIsHoldingSOS(false);
+      setShowSosToast(true);
+
+      if (currentUser) {
+        try {
+          await triggerSOSEvent(currentUser);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      setTimeout(() => {
+        setSosActivated(false);
+        setShowSosToast(false);
+        setSosTransition('none');
+        setSosProgressOffset(SOS_RING_LENGTH);
+      }, 4000);
+    }, SOS_HOLD_MS);
+  };
+
+  const handleSOSCancel = () => {
+    if (sosActivated) return;
+    if (sosTimerRef.current) {
+      clearTimeout(sosTimerRef.current);
+      sosTimerRef.current = null;
+    }
+    setIsHoldingSOS(false);
+    setSosTransition('none');
+    setSosProgressOffset(SOS_RING_LENGTH);
+  };
+
+  const initials = currentUser?.full_name
+    ? currentUser.full_name
+        .split(' ')
+        .map((n) => n[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase()
+    : 'TA';
+
   return (
-    <div className="min-h-screen bg-[#FBF8F1] py-8 px-4 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-5xl mx-auto space-y-8">
-        {/* Page Top Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E4D9BE] pb-6">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="px-2.5 py-0.5 rounded-full bg-[#0F472A] text-[#E7D19C] text-[11px] font-bold uppercase tracking-wider">
-                Official Gazette
-              </span>
-              <span className="text-xs text-[#10241A]/70 font-semibold">
-                Lighthouse Estate Board
-              </span>
-            </div>
-            <h1 className="fraunces text-3xl sm:text-4xl font-bold text-[#0A2F1C]">
-              Community Notices & Alerts
-            </h1>
-            <p className="text-xs sm:text-sm text-[#10241A]/70 mt-1 max-w-xl">
-              Official bulletins, utility updates, seasonal religious events, and emergency estate advisories.
-            </p>
+    <div className="min-h-screen bg-[#FBFDF9] text-[#16241D] font-sans pb-32">
+      {/* SVG Pattern Definition */}
+      <svg width="0" height="0" className="absolute">
+        <defs>
+          <pattern id="lattice-notices" width="56" height="56" patternUnits="userSpaceOnUse">
+            <g fill="none" stroke="currentColor" strokeWidth="1">
+              <rect x="10" y="10" width="36" height="36" transform="rotate(45 28 28)" />
+              <rect x="15" y="15" width="26" height="26" />
+            </g>
+          </pattern>
+        </defs>
+      </svg>
+
+      {/* Top Header */}
+      <header className="sticky top-0 z-40 flex justify-between items-center px-4 sm:px-6 py-4 bg-[#123528]/95 backdrop-blur-md border-b border-white/10">
+        <div className="flex items-center gap-2.5 bg-white/14 border border-white/16 backdrop-blur-md rounded-full px-3.5 py-1.5 shadow-xs">
+          <div className="w-7 h-7 rounded-[9px] bg-[#3FAE7A] flex items-center justify-center flex-shrink-0">
+            <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-[#0D2A1F]">
+              <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M12 7v10M7 12h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
           </div>
-
-          {(currentUser?.role === 'admin' ||
-            currentUser?.role === 'master_admin' ||
-            currentUser?.role === 'madrasa_admin') && (
-            <button
-              onClick={() => navigate('/admin')}
-              className="px-5 py-2.5 rounded-xl bg-[#0F472A] text-white text-xs font-bold hover:bg-[#0A2F1C] transition-all shadow-soft flex items-center gap-2 shrink-0"
-            >
-              <Bell className="w-4 h-4 text-[#E7D19C]" />
-              <span>Post / Manage Notices</span>
-            </button>
-          )}
+          <span className="font-['Sora'] font-bold text-xs sm:text-sm text-white tracking-tight">
+            {currentUser?.role === 'resident'
+              ? `House ${currentUser.house_number} · ${currentUser.house_unit || 'Main House'}`
+              : 'Estate Bulletins'}
+          </span>
         </div>
 
-        {/* Filter Pills */}
-        <div className="flex flex-wrap items-center gap-2 pb-1">
+        <div className="flex items-center gap-2 bg-white/14 border border-white/16 backdrop-blur-md rounded-full px-2.5 py-1 shadow-xs">
           <button
-            onClick={() => {
-              setSelectedFilter('all');
-              setCurrentPage(1);
-            }}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-              selectedFilter === 'all'
-                ? 'bg-[#0F472A] text-white shadow-xs'
-                : 'bg-white border border-[#E4D9BE] text-[#10241A]/70 hover:bg-[#F2EAD9]'
-            }`}
+            onClick={() => navigate('/notices')}
+            className="relative w-8 h-8 rounded-full bg-white/14 border border-white/16 flex items-center justify-center text-white hover:bg-white/25 transition-colors cursor-pointer"
+            aria-label="Notifications"
           >
-            <span>All Bulletins</span>
-            <span
-              className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                selectedFilter === 'all' ? 'bg-[#C89B3C] text-white' : 'bg-[#F2EAD9] text-[#0A2F1C]'
-              }`}
-            >
-              {notices.length}
-            </span>
+            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[#E8C547] border border-[#123528]" />
+            <Bell className="w-4 h-4" />
           </button>
-
           <button
-            onClick={() => {
-              setSelectedFilter('emergency');
-              setCurrentPage(1);
-            }}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-              selectedFilter === 'emergency'
-                ? 'bg-red-800 text-white shadow-xs'
-                : 'bg-white border border-red-200 text-red-800 hover:bg-red-50'
-            }`}
+            onClick={() => navigate('/settings')}
+            className="w-8 h-8 rounded-full bg-[#E8C547] text-[#4A3B0A] flex items-center justify-center font-['Sora'] font-bold text-xs hover:opacity-90 transition-opacity cursor-pointer"
+            title="Account & Profile Settings"
           >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>Emergency Advisories</span>
-            <span
-              className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                selectedFilter === 'emergency' ? 'bg-white text-red-900' : 'bg-red-100 text-red-800'
-              }`}
-            >
-              {emergencyCount}
-            </span>
-          </button>
-
-          <button
-            onClick={() => {
-              setSelectedFilter('event');
-              setCurrentPage(1);
-            }}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-              selectedFilter === 'event'
-                ? 'bg-[#C89B3C] text-white shadow-xs'
-                : 'bg-white border border-[#E4D9BE] text-[#10241A]/70 hover:bg-[#F2EAD9]'
-            }`}
-          >
-            <Calendar className="w-3.5 h-3.5" />
-            <span>Community Events</span>
-            <span
-              className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                selectedFilter === 'event' ? 'bg-white text-[#0A2F1C]' : 'bg-[#F2EAD9] text-[#0A2F1C]'
-              }`}
-            >
-              {eventCount}
-            </span>
-          </button>
-
-          <button
-            onClick={() => {
-              setSelectedFilter('info');
-              setCurrentPage(1);
-            }}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-              selectedFilter === 'info'
-                ? 'bg-[#0F472A] text-white shadow-xs'
-                : 'bg-white border border-[#E4D9BE] text-[#10241A]/70 hover:bg-[#F2EAD9]'
-            }`}
-          >
-            <Info className="w-3.5 h-3.5" />
-            <span>General Info</span>
-            <span
-              className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                selectedFilter === 'info' ? 'bg-[#C89B3C] text-white' : 'bg-[#F2EAD9] text-[#0A2F1C]'
-              }`}
-            >
-              {infoCount}
-            </span>
+            {initials}
           </button>
         </div>
+      </header>
 
-        {/* Notices Stream (Reverse Chronological, Emergency Pinned to Top) */}
-        <div className="space-y-6">
-          {paginatedNotices.length === 0 ? (
-            <div className="card-estate p-12 text-center bg-white border-[#E4D9BE] shadow-soft space-y-3">
-              <Bell className="w-12 h-12 text-[#C89B3C] mx-auto opacity-50" />
-              <h3 className="fraunces text-xl font-bold text-[#0A2F1C]">
-                No Notices in this Category
-              </h3>
-              <p className="text-xs text-[#10241A]/70">
-                Check other categories or reset the filter to view all gazettes.
+      {/* Hero Header */}
+      <div className="bg-gradient-to-br from-[#123528] to-[#0D2A1F] text-white px-4 sm:px-6 pt-6 pb-12 relative overflow-hidden">
+        <svg className="absolute inset-0 w-full h-full opacity-[0.13] pointer-events-none text-white">
+          <rect width="100%" height="100%" fill="url(#lattice-notices)" />
+        </svg>
+        <div className="max-w-3xl mx-auto relative z-10">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="font-['Sora'] font-bold text-2xl sm:text-3xl tracking-tight text-white mb-1.5">
+                Notices &amp; Announcements
+              </h1>
+              <p className="text-xs sm:text-sm text-white/75 leading-relaxed">
+                Official estate bulletins, security advisories, utility maintenance alerts, and community notices.
               </p>
             </div>
-          ) : (
-            paginatedNotices.map((notice) => {
-              const isEmergency =
-                notice.type === 'emergency' ||
-                notice.category === 'emergency' ||
-                notice.priority === 'emergency' ||
-                notice.priority === 'urgent';
+            {(currentUser?.role === 'admin' || currentUser?.role === 'master_admin') && (
+              <button
+                onClick={() => navigate('/admin')}
+                className="px-4 py-2 rounded-xl bg-[#E8C547] hover:bg-[#DDB63A] text-[#4A3B0A] font-['Sora'] font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-98 transition-all shrink-0 self-start sm:self-auto"
+              >
+                <Bell className="w-4 h-4" />
+                <span>Admin Post</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
-              const isEvent = notice.type === 'event' || notice.category === 'event';
+      {/* Sheet Container */}
+      <div className="-mt-6 bg-[#FBFDF9] rounded-t-[26px] relative z-20 pt-6 px-4 sm:px-6">
+        <div className="max-w-3xl mx-auto space-y-6">
+
+          {/* Filter Pills */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+            <button
+              onClick={() => {
+                setSelectedFilter('all');
+                setCurrentPage(1);
+              }}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                selectedFilter === 'all'
+                  ? 'bg-[#257A54] text-white shadow-xs'
+                  : 'bg-white border border-[#E3EFE7] text-[#516459] hover:text-[#16241D]'
+              }`}
+            >
+              <span>All Bulletins</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/15 font-mono">
+                {notices.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setSelectedFilter('emergency');
+                setCurrentPage(1);
+              }}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                selectedFilter === 'emergency'
+                  ? 'bg-[#A32D2D] text-white shadow-xs'
+                  : 'bg-white border border-[#FCEBEB] text-[#A32D2D] hover:bg-[#FCEBEB]'
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>Advisories</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/15 font-mono">
+                {emergencyCount}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setSelectedFilter('event');
+                setCurrentPage(1);
+              }}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                selectedFilter === 'event'
+                  ? 'bg-[#B4922C] text-white shadow-xs'
+                  : 'bg-white border border-[#E3EFE7] text-[#516459] hover:text-[#16241D]'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Events</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/15 font-mono">
+                {eventCount}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setSelectedFilter('info');
+                setCurrentPage(1);
+              }}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                selectedFilter === 'info'
+                  ? 'bg-[#257A54] text-white shadow-xs'
+                  : 'bg-white border border-[#E3EFE7] text-[#516459] hover:text-[#16241D]'
+              }`}
+            >
+              <Info className="w-3.5 h-3.5" />
+              <span>General Info</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/15 font-mono">
+                {infoCount}
+              </span>
+            </button>
+          </div>
+
+          {/* Notices List */}
+          <div className="space-y-4">
+            {paginatedNotices.map((n) => {
+              const isEmerg = n.type === 'emergency' || n.category === 'emergency' || n.priority === 'urgent' || n.priority === 'emergency';
+              const isEvent = n.type === 'event' || n.category === 'event';
 
               return (
                 <div
-                  key={notice.id}
-                  className={`bg-white rounded-[16px] p-6 sm:p-7 space-y-4 shadow-soft transition-all ${
-                    isEmergency
-                      ? 'border-2 border-red-500 bg-rose-50/20 ring-1 ring-red-400'
-                      : isEvent
-                      ? 'border-2 border-[#C89B3C]/70'
-                      : 'border border-[#E4D9BE]'
+                  key={n.id}
+                  className={`bg-white border rounded-2xl p-5 shadow-xs transition-all ${
+                    isEmerg
+                      ? 'border-[#A32D2D]/30 bg-gradient-to-r from-[#FFF8F8] to-white'
+                      : 'border-[#E3EFE7] hover:border-[#3FAE7A]/40'
                   }`}
                 >
-                  {/* Top Badge & Header */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E4D9BE]/60 pb-3">
+                  <div className="flex items-start justify-between gap-3 mb-2">
                     <div className="flex items-center gap-2">
-                      {isEmergency ? (
-                        <span className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider px-3 py-1 rounded-full bg-red-600 text-white shadow-xs animate-pulse">
-                          <Flame className="w-3.5 h-3.5" />
-                          <span>EMERGENCY ADVISORY • PINNED</span>
-                        </span>
-                      ) : isEvent ? (
-                        <span className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider px-3 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                          <Calendar className="w-3.5 h-3.5 text-[#C89B3C]" />
-                          <span>COMMUNITY EVENT</span>
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
-                          <Info className="w-3.5 h-3.5 text-[#0F472A]" />
-                          <span>GENERAL INFORMATION</span>
+                      <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-['Sora'] font-bold uppercase tracking-wider ${
+                        isEmerg
+                          ? 'bg-[#FCEBEB] text-[#A32D2D]'
+                          : isEvent
+                          ? 'bg-[#FBF3D9] text-[#B4922C]'
+                          : 'bg-[#EAF7EE] text-[#257A54]'
+                      }`}>
+                        {isEmerg ? 'Emergency Notice' : isEvent ? 'Community Event' : 'Estate Update'}
+                      </span>
+                      {isEmerg && (
+                        <span className="px-2 py-0.5 rounded-full bg-[#A32D2D] text-white text-[10px] font-bold flex items-center gap-1 animate-pulse">
+                          <Flame className="w-3 h-3" />
+                          <span>Urgent</span>
                         </span>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-1.5 text-xs text-[#10241A]/60 font-medium">
-                      <Clock className="w-3.5 h-3.5 text-[#C89B3C]" />
-                      <span>
-                        {new Date(notice.created_at).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}{' '}
-                        at{' '}
-                        {new Date(notice.created_at).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                    </div>
+                    <span className="text-[11px] text-[#8AA096] flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {new Date(n.created_at).toLocaleDateString()}
+                    </span>
                   </div>
 
-                  {/* Title & Body with Line Breaks Preserved */}
-                  <div>
-                    <h2
-                      className={`fraunces text-xl sm:text-2xl font-bold ${
-                        isEmergency ? 'text-red-950' : 'text-[#0A2F1C]'
-                      }`}
-                    >
-                      {notice.title}
-                    </h2>
-                    <p className="text-xs sm:text-sm text-[#10241A]/85 mt-2.5 whitespace-pre-wrap leading-relaxed">
-                      {notice.body || notice.content}
-                    </p>
-                  </div>
+                  <h3 className="font-['Sora'] font-bold text-base text-[#16241D] mb-1.5">
+                    {n.title}
+                  </h3>
 
-                  {/* Footer metadata */}
-                  <div className="pt-3 border-t border-[#E4D9BE]/60 flex flex-wrap items-center justify-between text-xs text-[#10241A]/60 gap-2">
-                    <span>
-                      Issued by: <strong>{notice.author_name}</strong> ({notice.author_role.replace('_', ' ')})
-                    </span>
-                    <span className="font-mono text-[11px] text-[#0F472A]">
-                      Ref: LH-GAZ-{notice.id.slice(-6).toUpperCase()}
-                    </span>
+                  <p className="text-xs text-[#516459] leading-relaxed mb-3">
+                    {n.body || n.content}
+                  </p>
+
+                  <div className="flex items-center justify-between text-[11px] text-[#8AA096] pt-2 border-t border-[#E3EFE7]">
+                    <span>Published by: <strong className="text-[#16241D]">{n.author_name || 'Light House Estate Management Exco'}</strong></span>
+                    <span className="text-[#257A54] font-medium">{n.author_role || 'Estate Administration'}</span>
                   </div>
                 </div>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
 
-        {/* Pagination Controls */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between border-t border-[#E4D9BE] pt-4">
-            <span className="text-xs text-[#10241A]/70">
-              Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–
-              {Math.min(currentPage * ITEMS_PER_PAGE, sortedAndFilteredNotices.length)} of{' '}
-              {sortedAndFilteredNotices.length} notices
-            </span>
-            <div className="flex items-center gap-2">
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-3 pt-2">
               <button
+                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                 disabled={currentPage === 1}
-                onClick={() => setCurrentPage((p) => p - 1)}
-                className="p-2 rounded-lg border border-[#E4D9BE] bg-white disabled:opacity-40 hover:bg-[#F2EAD9]"
+                className="w-9 h-9 rounded-xl border border-[#E3EFE7] bg-white flex items-center justify-center text-[#516459] disabled:opacity-40"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="text-xs font-bold text-[#0A2F1C]">
+              <span className="text-xs font-bold text-[#516459]">
                 Page {currentPage} of {totalPages}
               </span>
               <button
+                onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
                 disabled={currentPage === totalPages}
-                onClick={() => setCurrentPage((p) => p + 1)}
-                className="p-2 rounded-lg border border-[#E4D9BE] bg-white disabled:opacity-40 hover:bg-[#F2EAD9]"
+                className="w-9 h-9 rounded-xl border border-[#E3EFE7] bg-white flex items-center justify-center text-[#516459] disabled:opacity-40"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
+          )}
+
+        </div>
+      </div>
+
+      {/* Floating Bottom Dock */}
+      <nav className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex gap-1 bg-[#0D2A1F]/92 backdrop-blur-md border border-white/10 p-2 rounded-full shadow-2xl">
+        <button
+          onClick={() => navigate('/dashboard')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 11l8-7 8 7" />
+            <path d="M6 10v9a1 1 0 001 1h10a1 1 0 001-1v-9" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Home</span>
+        </button>
+        <button
+          onClick={() => navigate('/passes')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 9a3 3 0 013-3h14a3 3 0 013 3v10a3 3 0 01-3 3H5a3 3 0 01-3-3V9z" />
+            <path d="M9 14h6" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Passes</span>
+        </button>
+        <button
+          onClick={() => navigate('/facilities')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 21h18M3 7v14M21 7v14M6 3h12v4H6z" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Facilities</span>
+        </button>
+        <button
+          onClick={() => navigate('/household')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="9" cy="8" r="3" />
+            <path d="M4 20c0-3 2.5-5 5-5s5 2 5 5" />
+            <circle cx="17" cy="9" r="2.3" />
+            <path d="M15 20c0-2.4 1-4 3.5-4.3" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Staff</span>
+        </button>
+        <button
+          onClick={() => navigate('/notices')}
+          className="w-12 h-11 border-none bg-white/12 text-[#E8C547] rounded-full flex flex-col items-center justify-center gap-0.5 cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 8a6 6 0 1112 0c0 4 1.5 6 2 6H4c0.5 0 2-2 2-6z" />
+            <path d="M10 20a2 2 0 004 0" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Notices</span>
+        </button>
+      </nav>
+
+      {/* Floating Emergency SOS Button */}
+      <div className="fixed right-4 bottom-5 w-[70px] h-[70px] z-50">
+        <svg className="absolute inset-0 w-[70px] h-[70px] -rotate-90 pointer-events-none" viewBox="0 0 70 70">
+          <circle cx="35" cy="35" r="31" stroke="rgba(18,53,40,0.12)" strokeWidth="4" fill="none" />
+          <circle
+            cx="35"
+            cy="35"
+            r="31"
+            stroke="#C23A38"
+            strokeWidth="4"
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={SOS_RING_LENGTH}
+            strokeDashoffset={sosProgressOffset}
+            style={{ transition: sosTransition }}
+          />
+        </svg>
+
+        <button
+          onMouseDown={handleSOSStart}
+          onMouseUp={handleSOSCancel}
+          onMouseLeave={handleSOSCancel}
+          onTouchStart={handleSOSStart}
+          onTouchEnd={handleSOSCancel}
+          onTouchCancel={handleSOSCancel}
+          className={`absolute top-[7px] left-[7px] w-14 h-14 rounded-full border-none bg-gradient-to-br from-[#F0645F] to-[#C23A38] flex flex-col items-center justify-center gap-0.5 cursor-pointer shadow-lg select-none touch-none ${
+            isHoldingSOS ? 'scale-95' : 'animate-pulse'
+          } ${sosActivated ? 'bg-gradient-to-br from-[#FF6E68] to-[#D2413F] scale-105' : ''}`}
+          aria-label="Hold for 5 seconds for SOS"
+        >
+          <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3l9 16H3L12 3z" />
+            <line x1="12" y1="9" x2="12" y2="14" />
+            <circle cx="12" cy="17" r="0.6" fill="white" stroke="none" />
+          </svg>
+          <span className="font-['Sora'] font-extrabold text-[8.5px] tracking-wider text-white">SOS</span>
+        </button>
+
+        {showSosToast && (
+          <div className="absolute bottom-20 right-0 bg-[#0D2A1F] border border-white/20 text-white text-xs font-semibold px-3 py-2 rounded-xl whitespace-nowrap shadow-xl">
+            Alert sent to gate security
           </div>
         )}
       </div>

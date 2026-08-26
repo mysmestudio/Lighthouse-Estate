@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Wrench, 
   Plus, 
@@ -17,16 +17,21 @@ import {
   User,
   Home,
   MessageSquare,
-  Vote
+  Bell,
+  Sparkles,
+  Search
 } from 'lucide-react';
 import { AppUser, FixItTicket, TicketCategory, TicketStatus } from '../types';
 import { fetchFixItTickets, submitFixItTicket, updateTicketStatusAndResolution } from '../lib/community-service';
-import { StarMotifDivider } from '../components/common/StarMotifDivider';
+import { triggerSOSEvent } from '../lib/sos-service';
 
 interface FixItTicketsPageProps {
   currentUser: AppUser | null;
   navigate: (path: string) => void;
 }
+
+const SOS_RING_LENGTH = 194.8;
+const SOS_HOLD_MS = 5000;
 
 export const FixItTicketsPage: React.FC<FixItTicketsPageProps> = ({ currentUser, navigate }) => {
   const [tickets, setTickets] = useState<FixItTicket[]>([]);
@@ -48,6 +53,14 @@ export const FixItTicketsPage: React.FC<FixItTicketsPageProps> = ({ currentUser,
   const [adminStatus, setAdminStatus] = useState<TicketStatus>('in_progress');
   const [adminNotes, setAdminNotes] = useState('');
   const [updateLoading, setUpdateLoading] = useState(false);
+
+  // SOS state
+  const [isHoldingSOS, setIsHoldingSOS] = useState(false);
+  const [sosActivated, setSosActivated] = useState(false);
+  const [showSosToast, setShowSosToast] = useState(false);
+  const [sosProgressOffset, setSosProgressOffset] = useState(SOS_RING_LENGTH);
+  const [sosTransition, setSosTransition] = useState<string>('none');
+  const sosTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin' || currentUser?.role === 'madrasa_admin' || currentUser?.role === 'security';
 
@@ -98,31 +111,34 @@ export const FixItTicketsPage: React.FC<FixItTicketsPageProps> = ({ currentUser,
         setDescription('');
         setPhotoUrl('');
         setCategory('Electrical');
-        setSubmitSuccess('Fix-It ticket submitted. Estate maintenance team has been notified.');
-        await loadTickets();
-        setTimeout(() => setSubmitSuccess(null), 5000);
+        setSubmitSuccess('Ticket submitted! Estate maintenance team has been notified.');
+        loadTickets();
+        setTimeout(() => setSubmitSuccess(null), 4000);
       }
-    } catch (e: any) {
-      setSubmitError(e?.message || 'Failed to submit ticket.');
+    } catch (err: any) {
+      setSubmitError(err?.message || 'Failed to submit ticket');
     } finally {
       setSubmitLoading(false);
     }
   };
 
-  const handleAdminUpdate = async (e: React.FormEvent) => {
+  const handleUpdateStatus = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTicket || !currentUser) return;
+    if (!selectedTicket) return;
 
     setUpdateLoading(true);
     try {
-      await updateTicketStatusAndResolution({
+      const res = await updateTicketStatusAndResolution({
         ticketId: selectedTicket.id,
         status: adminStatus,
-        resolutionNotes: adminNotes,
-        adminName: currentUser.full_name || 'Estate Admin',
+        resolutionNotes: adminNotes.trim() || undefined,
+        adminName: currentUser?.full_name || 'Admin',
       });
-      setSelectedTicket(null);
-      await loadTickets();
+
+      if (res.success) {
+        setSelectedTicket(null);
+        loadTickets();
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -145,13 +161,13 @@ export const FixItTicketsPage: React.FC<FixItTicketsPageProps> = ({ currentUser,
   const getCategoryIcon = (cat: TicketCategory) => {
     switch (cat) {
       case 'Electrical':
-        return <Zap className="w-4 h-4 text-amber-600" />;
+        return <Zap className="w-4 h-4 text-amber-500" />;
       case 'Plumbing':
-        return <Droplet className="w-4 h-4 text-blue-600" />;
+        return <Droplet className="w-4 h-4 text-sky-500" />;
       case 'Security':
         return <ShieldCheck className="w-4 h-4 text-emerald-600" />;
       default:
-        return <Wrench className="w-4 h-4 text-purple-600" />;
+        return <Wrench className="w-4 h-4 text-[#257A54]" />;
     }
   };
 
@@ -159,376 +175,392 @@ export const FixItTicketsPage: React.FC<FixItTicketsPageProps> = ({ currentUser,
     switch (status) {
       case 'pending':
         return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
-            <Clock className="w-3 h-3 text-amber-700" />
-            <span>Pending</span>
+          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#FBF3D9] text-[#8C6D1F] border border-[#E8C547]/40 flex items-center gap-1">
+            <Clock className="w-3 h-3 text-[#B4922C]" />
+            <span>Pending Review</span>
           </span>
         );
       case 'in_progress':
         return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-sky-100 text-sky-900 border border-sky-300 flex items-center gap-1">
-            <Wrench className="w-3 h-3 text-sky-700" />
+          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#E8F1FC] text-[#1E5692] border border-[#B3D4FC] flex items-center gap-1">
+            <Wrench className="w-3 h-3 text-[#1E5692]" />
             <span>In Progress</span>
           </span>
         );
       case 'resolved':
         return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#EAF7EE] text-[#257A54] border border-[#3FAE7A]/30 flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3 text-[#3FAE7A]" />
             <span>Resolved</span>
           </span>
         );
     }
   };
 
-  return (
-    <div className="min-h-screen bg-[#FBF8F1] py-8 sm:py-12 font-sans">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-        
-        {/* Navigation Breadcrumb & Community Sub-nav */}
-        <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[#E4D9BE]">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#10241A]/60">
-            <button onClick={() => navigate('/dashboard')} className="hover:text-[#0F472A]">Dashboard</button>
-            <ChevronRight className="w-3.5 h-3.5" />
-            <span className="text-[#0F472A] font-bold">Fix-It Maintenance Tickets</span>
-          </div>
+  // SOS Press & Hold
+  const handleSOSStart = (e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
+    if (sosActivated) return;
 
-          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#F2EAD9] border border-[#E4D9BE] text-xs font-semibold">
-            <button
-              onClick={() => navigate('/community/polls')}
-              className="px-3 py-1.5 rounded-lg text-[#10241A]/70 hover:text-[#0F472A] hover:bg-white/60 transition-colors flex items-center gap-1.5"
-            >
-              <Vote className="w-3.5 h-3.5" />
-              <span>Townhall Polls</span>
-            </button>
-            <button
-              onClick={() => navigate('/community/tickets')}
-              className="px-3 py-1.5 rounded-lg bg-[#0F472A] text-white shadow-2xs flex items-center gap-1.5"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Fix-It Tickets</span>
-            </button>
-            <button
-              onClick={() => navigate('/community/marketplace')}
-              className="px-3 py-1.5 rounded-lg text-[#10241A]/70 hover:text-[#0F472A] hover:bg-white/60 transition-colors flex items-center gap-1.5"
-            >
-              <span>Marketplace</span>
-            </button>
-          </div>
+    setIsHoldingSOS(true);
+    setSosTransition(`stroke-dashoffset ${SOS_HOLD_MS / 1000}s linear`);
+    setSosProgressOffset(0);
+
+    sosTimerRef.current = setTimeout(async () => {
+      setSosActivated(true);
+      setIsHoldingSOS(false);
+      setShowSosToast(true);
+
+      if (currentUser) {
+        try {
+          await triggerSOSEvent(currentUser);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      setTimeout(() => {
+        setSosActivated(false);
+        setShowSosToast(false);
+        setSosTransition('none');
+        setSosProgressOffset(SOS_RING_LENGTH);
+      }, 4000);
+    }, SOS_HOLD_MS);
+  };
+
+  const handleSOSCancel = () => {
+    if (sosActivated) return;
+    if (sosTimerRef.current) {
+      clearTimeout(sosTimerRef.current);
+      sosTimerRef.current = null;
+    }
+    setIsHoldingSOS(false);
+    setSosTransition('none');
+    setSosProgressOffset(SOS_RING_LENGTH);
+  };
+
+  const initials = currentUser?.full_name
+    ? currentUser.full_name
+        .split(' ')
+        .map((n) => n[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase()
+    : 'TA';
+
+  return (
+    <div className="min-h-screen bg-[#FBFDF9] text-[#16241D] font-sans pb-32">
+      {/* SVG Pattern Definition */}
+      <svg width="0" height="0" className="absolute">
+        <defs>
+          <pattern id="lattice-tickets" width="56" height="56" patternUnits="userSpaceOnUse">
+            <g fill="none" stroke="currentColor" strokeWidth="1">
+              <rect x="10" y="10" width="36" height="36" transform="rotate(45 28 28)" />
+              <rect x="15" y="15" width="26" height="26" />
+            </g>
+          </pattern>
+        </defs>
+      </svg>
+
+      {/* Floating Pillbar Header */}
+      <header className="sticky top-0 z-40 flex justify-between items-center px-4 sm:px-6 py-4 bg-[#123528]/95 backdrop-blur-md border-b border-white/10">
+        <div className="flex items-center gap-2.5 bg-white/14 border border-white/16 backdrop-blur-md rounded-full px-3.5 py-1.5 shadow-xs">
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="w-7 h-7 rounded-[9px] bg-[#3FAE7A] flex items-center justify-center flex-shrink-0 hover:opacity-90 transition-opacity"
+            title="Light House Estate, Lekki"
+          >
+            <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-[#0D2A1F]">
+              <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M12 7v10M7 12h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
+          <span className="font-['Sora'] font-bold text-xs sm:text-sm text-white tracking-tight">
+            {currentUser?.role === 'resident'
+              ? `House ${currentUser.house_number} · ${currentUser.house_unit || 'Main House'}`
+              : 'Maintenance Hub'}
+          </span>
         </div>
 
-        {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#E7D19C]/40 border border-[#C89B3C]/30 text-[#0A2F1C] text-xs font-bold uppercase tracking-wider mb-2">
-              <Wrench className="w-3.5 h-3.5 text-[#C89B3C]" />
-              <span>Estate Maintenance Desk</span>
-            </div>
-            <h1 className="font-serif text-2xl sm:text-4xl font-bold text-[#0A2F1C] tracking-tight">
-              Fix-It Tickets
-            </h1>
-            <p className="text-sm sm:text-base text-[#10241A]/70 mt-1 max-w-2xl">
-              {isAdmin 
-                ? 'Review and manage all estate maintenance requests across Sector A, B, and C.' 
-                : 'Report household maintenance issues, street lighting faults, plumbing defects, or security concerns.'}
-            </p>
-          </div>
-
+        <div className="flex items-center gap-2 bg-white/14 border border-white/16 backdrop-blur-md rounded-full px-2.5 py-1 shadow-xs">
           <button
-            onClick={() => setShowSubmitModal(true)}
-            className="px-5 py-2.5 rounded-xl bg-[#0F472A] text-white font-bold text-sm hover:bg-[#0A2F1C] transition-all shadow-soft flex items-center gap-2 self-start sm:self-auto"
+            onClick={() => navigate('/notices')}
+            className="relative w-8 h-8 rounded-full bg-white/14 border border-white/16 flex items-center justify-center text-white hover:bg-white/25 transition-colors"
+            aria-label="Notifications"
           >
-            <Plus className="w-4 h-4 text-[#E7D19C]" />
-            <span>Submit Fix-It Ticket</span>
+            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[#E8C547] border border-[#123528]" />
+            <Bell className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => navigate('/settings')}
+            className="w-8 h-8 rounded-full bg-[#E8C547] text-[#4A3B0A] flex items-center justify-center font-['Sora'] font-bold text-xs hover:opacity-90 transition-opacity"
+            title="Account Settings"
+          >
+            {initials}
           </button>
         </div>
+      </header>
 
-        <StarMotifDivider className="py-2" />
+      {/* Hero Header with SVG Lattice Pattern */}
+      <div className="bg-gradient-to-br from-[#123528] to-[#0D2A1F] text-white px-4 sm:px-6 pt-6 pb-12 relative overflow-hidden">
+        <svg className="absolute inset-0 w-full h-full opacity-[0.13] pointer-events-none text-white">
+          <rect width="100%" height="100%" fill="url(#lattice-tickets)" />
+        </svg>
 
-        {/* Success Banner */}
-        {submitSuccess && (
-          <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-sm font-medium flex items-center gap-3 animate-fade-in">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-            <span>{submitSuccess}</span>
-          </div>
-        )}
+        <div className="max-w-4xl mx-auto relative z-10">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="px-2 py-0.5 rounded-md bg-[#3FAE7A]/25 text-[#76dfa8] text-[10.5px] font-['Sora'] font-bold uppercase tracking-wider border border-[#3FAE7A]/30">
+                  Estate Services
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-white/10 text-white/80 text-[10.5px] font-bold">
+                  {tickets.length} Active Tickets
+                </span>
+              </div>
+              <h1 className="font-['Sora'] font-bold text-xl sm:text-2xl tracking-tight text-white">
+                Fix-It Maintenance Tickets
+              </h1>
+              <p className="text-xs text-white/70">
+                Log repairs, report electrical/plumbing issues, and track facility maintenance
+              </p>
+            </div>
 
-        {/* Quick KPI Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-          <div className="card-estate p-4 bg-white border border-[#E4D9BE]">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[#10241A]/60">Total Tickets</p>
-            <p className="font-serif text-2xl sm:text-3xl font-bold text-[#0A2F1C] mt-1">{tickets.length}</p>
-          </div>
-          <div className="card-estate p-4 bg-white border border-[#E4D9BE]">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-amber-800">Pending Review</p>
-            <p className="font-serif text-2xl sm:text-3xl font-bold text-amber-700 mt-1">
-              {tickets.filter((t) => t.status === 'pending').length}
-            </p>
-          </div>
-          <div className="card-estate p-4 bg-white border border-[#E4D9BE]">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-sky-800">In Progress</p>
-            <p className="font-serif text-2xl sm:text-3xl font-bold text-sky-700 mt-1">
-              {tickets.filter((t) => t.status === 'in_progress').length}
-            </p>
-          </div>
-          <div className="card-estate p-4 bg-white border border-[#E4D9BE]">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Resolved</p>
-            <p className="font-serif text-2xl sm:text-3xl font-bold text-emerald-700 mt-1">
-              {tickets.filter((t) => t.status === 'resolved').length}
-            </p>
+            <button
+              onClick={() => setShowSubmitModal(true)}
+              className="px-4 py-2.5 rounded-2xl bg-[#E8C547] hover:bg-[#DDB63A] text-[#4A3B0A] font-['Sora'] font-bold text-xs flex items-center gap-2 shadow-md transition-all self-start sm:self-auto shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Report Issue</span>
+            </button>
           </div>
         </div>
+      </div>
 
-        {/* Filter Controls */}
-        <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl bg-white border border-[#E4D9BE] shadow-2xs">
-          {/* Status Tabs */}
-          <div className="flex items-center gap-1 bg-[#F2EAD9]/60 p-1 rounded-lg border border-[#E4D9BE] text-xs font-semibold">
-            <button
-              onClick={() => setStatusFilter('all')}
-              className={`px-3 py-1.5 rounded-md transition-all ${
-                statusFilter === 'all' ? 'bg-[#0F472A] text-white shadow-xs' : 'text-[#10241A]/70 hover:bg-[#F2EAD9]'
-              }`}
-            >
-              All Status
-            </button>
-            <button
-              onClick={() => setStatusFilter('pending')}
-              className={`px-3 py-1.5 rounded-md transition-all ${
-                statusFilter === 'pending' ? 'bg-[#0F472A] text-white shadow-xs' : 'text-[#10241A]/70 hover:bg-[#F2EAD9]'
-              }`}
-            >
-              Pending
-            </button>
-            <button
-              onClick={() => setStatusFilter('in_progress')}
-              className={`px-3 py-1.5 rounded-md transition-all ${
-                statusFilter === 'in_progress' ? 'bg-[#0F472A] text-white shadow-xs' : 'text-[#10241A]/70 hover:bg-[#F2EAD9]'
-              }`}
-            >
-              In Progress
-            </button>
-            <button
-              onClick={() => setStatusFilter('resolved')}
-              className={`px-3 py-1.5 rounded-md transition-all ${
-                statusFilter === 'resolved' ? 'bg-[#0F472A] text-white shadow-xs' : 'text-[#10241A]/70 hover:bg-[#F2EAD9]'
-              }`}
-            >
-              Resolved
-            </button>
-          </div>
+      {/* Rounded Sheet Container */}
+      <div className="-mt-6 bg-[#FBFDF9] rounded-t-[26px] relative z-20 pt-6 px-4 sm:px-6">
+        <div className="max-w-4xl mx-auto space-y-6">
 
-          {/* Category Filter */}
-          <div className="flex items-center gap-2">
-            <Filter className="w-3.5 h-3.5 text-[#C89B3C]" />
+          {/* Success Toast */}
+          {submitSuccess && (
+            <div className="p-4 rounded-2xl bg-[#EAF7EE] border border-[#3FAE7A]/30 text-[#257A54] text-xs font-semibold flex items-center gap-2.5 shadow-xs">
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+              <span>{submitSuccess}</span>
+            </div>
+          )}
+
+          {/* Filters Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-[#E3EFE7] shadow-xs">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+              {(['all', 'pending', 'in_progress', 'resolved'] as const).map((status) => (
+                <button
+                  key={status}
+                  onClick={() => setStatusFilter(status)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-['Sora'] font-bold capitalize transition-colors whitespace-nowrap cursor-pointer ${
+                    statusFilter === status
+                      ? 'bg-[#123528] text-white shadow-xs'
+                      : 'bg-[#FBFDF9] text-[#516459] hover:bg-[#EAF7EE] hover:text-[#123528]'
+                  }`}
+                >
+                  {status === 'all' ? 'All Status' : status.replace('_', ' ')}
+                </button>
+              ))}
+            </div>
+
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-3 py-1.5 rounded-lg border border-[#E4D9BE] bg-[#FBF8F1] text-xs font-medium text-[#10241A] focus:ring-1 focus:ring-[#0F472A] focus:outline-none"
+              className="h-8 px-3 bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl text-xs font-bold text-[#16241D] focus:outline-none focus:border-[#3FAE7A]"
             >
               <option value="all">All Categories</option>
-              <option value="Electrical">Electrical</option>
-              <option value="Plumbing">Plumbing</option>
-              <option value="Security">Security</option>
-              <option value="Other">Other</option>
+              <option value="Electrical">⚡ Electrical</option>
+              <option value="Plumbing">💧 Plumbing</option>
+              <option value="Security">🛡️ Security</option>
+              <option value="Carpentry">🪚 Carpentry</option>
+              <option value="HVAC">❄️ AC / HVAC</option>
+              <option value="Other">🔧 Other</option>
             </select>
           </div>
-        </div>
 
-        {/* Tickets Listing */}
-        {loading ? (
-          <div className="text-center py-16 space-y-3">
-            <div className="w-10 h-10 mx-auto border-3 border-[#0F472A] border-t-transparent rounded-full animate-spin" />
-            <p className="text-xs text-[#10241A]/60">Loading tickets...</p>
-          </div>
-        ) : filteredTickets.length === 0 ? (
-          <div className="card-estate p-12 text-center space-y-3 bg-white">
-            <Wrench className="w-10 h-10 mx-auto text-[#C89B3C]/70" />
-            <h3 className="font-serif text-lg font-bold text-[#0A2F1C]">No Tickets Found</h3>
-            <p className="text-xs text-[#10241A]/60 max-w-md mx-auto">
-              {isAdmin 
-                ? 'No maintenance tickets match the selected filters.' 
-                : 'You have not submitted any maintenance tickets yet. Click "Submit Fix-It Ticket" above to report an issue.'}
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4">
-            {filteredTickets.map((ticket) => (
-              <div 
-                key={ticket.id}
-                className="card-estate p-5 sm:p-6 bg-white border border-[#E4D9BE] hover:border-[#C89B3C] shadow-soft transition-all space-y-4"
-              >
-                {/* Header Row */}
-                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#E4D9BE]/60">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-[#F2EAD9] border border-[#E4D9BE]">
-                      {getCategoryIcon(ticket.category)}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-[#0A2F1C]">
-                          {ticket.category} Issue
-                        </span>
-                        <span className="text-xs text-[#10241A]/40 font-mono">
-                          #{ticket.id.slice(-6).toUpperCase()}
-                        </span>
-                      </div>
-                      <p className="text-xs text-[#10241A]/60 flex items-center gap-1.5 mt-0.5">
-                        <Home className="w-3 h-3 text-[#C89B3C]" />
-                        <span>House {ticket.house_number} ({ticket.house_unit})</span>
-                        <span>•</span>
-                        <span>Submitted by {ticket.resident_name}</span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    {getStatusBadge(ticket.status)}
-                    <span className="text-xs text-[#10241A]/50">
-                      {new Date(ticket.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Description Body */}
-                <div className="text-sm text-[#10241A] leading-relaxed">
-                  {ticket.description}
-                </div>
-
-                {/* Photo Attachment if available */}
-                {ticket.photo_url && (
-                  <div className="p-2 rounded-lg bg-[#FBF8F1] border border-[#E4D9BE] inline-flex items-center gap-2 text-xs text-[#0F472A]">
-                    <Camera className="w-4 h-4 text-[#C89B3C]" />
-                    <span>Photo attached by resident</span>
-                  </div>
-                )}
-
-                {/* Resolution Notes Box if provided */}
-                {ticket.resolution_notes && (
-                  <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200 text-xs text-emerald-950 space-y-1">
-                    <div className="flex items-center gap-1.5 font-bold text-emerald-900">
-                      <MessageSquare className="w-3.5 h-3.5 text-emerald-700" />
-                      <span>Resolution Update ({ticket.resolved_by || 'Maintenance'}):</span>
-                    </div>
-                    <p className="leading-relaxed pl-5">{ticket.resolution_notes}</p>
-                  </div>
-                )}
-
-                {/* Admin Management Action */}
-                {isAdmin && (
-                  <div className="pt-2 flex justify-end border-t border-[#E4D9BE]/40">
-                    <button
-                      type="button"
-                      onClick={() => openAdminModal(ticket)}
-                      className="px-3.5 py-1.5 rounded-lg bg-[#F2EAD9] hover:bg-[#E7D19C] text-[#0A2F1C] border border-[#E4D9BE] text-xs font-bold transition-all flex items-center gap-1.5"
-                    >
-                      <Wrench className="w-3.5 h-3.5 text-[#0F472A]" />
-                      <span>Update Status & Notes</span>
-                    </button>
-                  </div>
-                )}
+          {/* Tickets List */}
+          {loading ? (
+            <div className="py-16 text-center text-xs font-semibold text-[#8AA096]">
+              Loading maintenance tickets...
+            </div>
+          ) : filteredTickets.length === 0 ? (
+            <div className="bg-white border border-[#E3EFE7] rounded-3xl p-10 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mx-auto">
+                <Wrench className="w-6 h-6" />
               </div>
-            ))}
-          </div>
-        )}
+              <h3 className="font-['Sora'] font-bold text-sm text-[#16241D]">No tickets found</h3>
+              <p className="text-xs text-[#8AA096] max-w-sm mx-auto">
+                {statusFilter === 'all' && categoryFilter === 'all'
+                  ? 'All estate facilities and household services are running normally.'
+                  : 'No maintenance requests match your selected filters.'}
+              </p>
+              <button
+                onClick={() => setShowSubmitModal(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#123528] text-white font-['Sora'] font-bold text-xs hover:bg-[#0D2A1F] transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5 text-[#E8C547]" />
+                <span>Submit New Ticket</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3.5">
+              {filteredTickets.map((ticket) => (
+                <div
+                  key={ticket.id}
+                  className="bg-white border border-[#E3EFE7] hover:border-[#3FAE7A]/40 rounded-2xl p-4 sm:p-5 shadow-xs transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                >
+                  <div className="space-y-2 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-lg bg-[#FBFDF9] border border-[#E3EFE7] text-xs font-bold text-[#16241D] flex items-center gap-1.5">
+                        {getCategoryIcon(ticket.category)}
+                        <span>{ticket.category}</span>
+                      </span>
+                      {getStatusBadge(ticket.status)}
+                      <span className="text-[11px] text-[#8AA096] font-medium">
+                        House {ticket.house_number} ({ticket.house_unit || 'Main House'})
+                      </span>
+                    </div>
+
+                    <p className="text-xs font-semibold text-[#16241D] leading-relaxed">
+                      {ticket.description}
+                    </p>
+
+                    {ticket.photo_url && (
+                      <div className="pt-1">
+                        <a
+                          href={ticket.photo_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-[#257A54] hover:underline"
+                        >
+                          <Camera className="w-3 h-3" />
+                          <span>View Attached Photo</span>
+                        </a>
+                      </div>
+                    )}
+
+                    {ticket.resolution_notes && (
+                      <div className="p-2.5 rounded-xl bg-[#EAF7EE]/60 border border-[#3FAE7A]/20 text-[11.5px] text-[#257A54]">
+                        <strong>Resolution Note:</strong> {ticket.resolution_notes}
+                        {ticket.resolved_by && ` (by ${ticket.resolved_by})`}
+                      </div>
+                    )}
+
+                    <div className="text-[10.5px] text-[#8AA096] flex items-center gap-2">
+                      <span>Submitted by {ticket.resident_name}</span>
+                      <span>•</span>
+                      <span>{new Date(ticket.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  </div>
+
+                  {isAdmin && (
+                    <button
+                      onClick={() => openAdminModal(ticket)}
+                      className="px-3.5 py-1.5 rounded-xl bg-[#EAF7EE] hover:bg-[#3FAE7A] hover:text-white text-[#257A54] font-['Sora'] font-bold text-xs border border-[#3FAE7A]/30 transition-colors shrink-0 self-start sm:self-center"
+                    >
+                      Update Status
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+        </div>
       </div>
 
-      {/* Resident Submit Ticket Modal */}
+      {/* SUBMIT TICKET MODAL */}
       {showSubmitModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="w-full max-w-lg bg-white rounded-2xl border border-[#C89B3C] shadow-2xl p-6 sm:p-8 space-y-6 animate-scale-up">
-            <div className="flex items-center justify-between pb-3 border-b border-[#E4D9BE]">
-              <div className="flex items-center gap-2">
-                <Wrench className="w-5 h-5 text-[#0F472A]" />
-                <h3 className="font-serif text-xl font-bold text-[#0A2F1C]">
-                  Submit Fix-It Ticket
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 border border-[#E3EFE7]">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E3EFE7]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-[#EAF7EE] text-[#257A54] flex items-center justify-center">
+                  <Wrench className="w-4 h-4" />
+                </div>
+                <h3 className="font-['Sora'] font-bold text-base text-[#16241D]">
+                  Submit Maintenance Ticket
                 </h3>
               </div>
-              <button 
+              <button
                 onClick={() => setShowSubmitModal(false)}
-                className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100"
+                className="w-8 h-8 rounded-full bg-[#FBFDF9] hover:bg-[#EAF7EE] text-[#516459] flex items-center justify-center transition-colors"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
             {submitError && (
-              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-medium flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <div className="p-3 rounded-xl bg-[#FCEBEB] text-[#A32D2D] text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{submitError}</span>
               </div>
             )}
 
-            <form onSubmit={handleSubmitTicket} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold uppercase tracking-wider text-[#0A2F1C]">
+            <form onSubmit={handleSubmitTicket} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-[#516459] uppercase tracking-wider mb-1.5 text-[10.5px]">
                   Issue Category *
                 </label>
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value as TicketCategory)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#E4D9BE] bg-[#FBF8F1]/40 text-sm focus:ring-2 focus:ring-[#0F472A] focus:outline-none"
+                  className="w-full h-10 px-3 bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl text-xs font-bold text-[#16241D] focus:outline-none focus:border-[#3FAE7A]"
                 >
-                  <option value="Electrical">⚡ Electrical (Streetlights, Inverter line, Phase fault)</option>
-                  <option value="Plumbing">💧 Plumbing (Water pressure, Drainage, Leakage)</option>
-                  <option value="Security">🛡️ Security (Perimeter fence, Gates, CCTV, Sensor)</option>
-                  <option value="Other">🔧 Other Maintenance Request</option>
+                  <option value="Electrical">⚡ Electrical (Power, Breaker, Outlets)</option>
+                  <option value="Plumbing">💧 Plumbing (Leaks, Water Pressure, Drain)</option>
+                  <option value="Security">🛡️ Security (Gate, Access, Intercom)</option>
+                  <option value="Carpentry">🪚 Carpentry (Doors, Locks, Cabinets)</option>
+                  <option value="HVAC">❄️ HVAC / Air Conditioning</option>
+                  <option value="Other">🔧 Other Estate Facility Maintenance</option>
                 </select>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold uppercase tracking-wider text-[#0A2F1C]">
+              <div>
+                <label className="block font-bold text-[#516459] uppercase tracking-wider mb-1.5 text-[10.5px]">
                   Description of Issue *
                 </label>
                 <textarea
                   rows={4}
                   required
-                  placeholder="Describe the exact location and symptoms (e.g. Streetlight pole #14 facing driveway flickers at night)..."
+                  placeholder="Please describe the issue, exact location in your house or compound, and any urgency details..."
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#E4D9BE] bg-[#FBF8F1]/40 text-sm focus:ring-2 focus:ring-[#0F472A] focus:outline-none"
+                  className="w-full p-3 bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl text-xs font-semibold text-[#16241D] focus:outline-none focus:border-[#3FAE7A]"
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold uppercase tracking-wider text-[#0A2F1C]">
-                  Photo Link / Reference (Optional)
+              <div>
+                <label className="block font-bold text-[#516459] uppercase tracking-wider mb-1.5 text-[10.5px]">
+                  Photo URL / Evidence (Optional)
                 </label>
-                <div className="flex items-center gap-2">
-                  <Camera className="w-4 h-4 text-[#C89B3C] shrink-0" />
-                  <input
-                    type="text"
-                    placeholder="https://... or photo description"
-                    value={photoUrl}
-                    onChange={(e) => setPhotoUrl(e.target.value)}
-                    className="flex-1 px-3.5 py-2 rounded-xl border border-[#E4D9BE] bg-[#FBF8F1]/40 text-sm focus:ring-2 focus:ring-[#0F472A] focus:outline-none"
-                  />
-                </div>
+                <input
+                  type="url"
+                  placeholder="https://images.unsplash.com/..."
+                  value={photoUrl}
+                  onChange={(e) => setPhotoUrl(e.target.value)}
+                  className="w-full h-10 px-3 bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl text-xs font-semibold text-[#16241D] focus:outline-none focus:border-[#3FAE7A]"
+                />
               </div>
 
-              <div className="p-3 rounded-xl bg-[#F2EAD9]/60 border border-[#E4D9BE] text-xs text-[#10241A]/70">
-                <span className="font-bold text-[#0A2F1C]">Submitting for: </span>
-                <span>House {currentUser?.house_number || 14} ({currentUser?.house_unit || 'Main House'}), {currentUser?.full_name}</span>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#E4D9BE]">
+              <div className="pt-2 flex gap-2">
                 <button
                   type="button"
                   onClick={() => setShowSubmitModal(false)}
-                  className="px-4 py-2 rounded-xl border border-neutral-300 text-sm font-semibold text-neutral-700 hover:bg-neutral-100"
+                  className="flex-1 py-3 rounded-xl bg-[#FBFDF9] border border-[#E3EFE7] font-['Sora'] font-bold text-xs text-[#516459] hover:bg-[#EAF7EE]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitLoading}
-                  className="px-6 py-2 rounded-xl bg-[#0F472A] text-white font-bold text-sm hover:bg-[#0A2F1C] transition-all disabled:opacity-50 flex items-center gap-2"
+                  className="flex-1 py-3 rounded-xl bg-[#123528] text-white font-['Sora'] font-bold text-xs hover:bg-[#0D2A1F] transition-colors disabled:opacity-50"
                 >
-                  {submitLoading ? (
-                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Plus className="w-4 h-4 text-[#E7D19C]" />
-                  )}
-                  <span>Submit Ticket</span>
+                  {submitLoading ? 'Submitting...' : 'Dispatch Ticket'}
                 </button>
               </div>
             </form>
@@ -536,79 +568,171 @@ export const FixItTicketsPage: React.FC<FixItTicketsPageProps> = ({ currentUser,
         </div>
       )}
 
-      {/* Admin Update Ticket Modal */}
+      {/* ADMIN UPDATE MODAL */}
       {selectedTicket && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="w-full max-w-md bg-white rounded-2xl border border-[#C89B3C] shadow-2xl p-6 sm:p-8 space-y-6 animate-scale-up">
-            <div className="flex items-center justify-between pb-3 border-b border-[#E4D9BE]">
-              <div className="flex items-center gap-2">
-                <Wrench className="w-5 h-5 text-[#0F472A]" />
-                <h3 className="font-serif text-xl font-bold text-[#0A2F1C]">
-                  Update Ticket #{selectedTicket.id.slice(-6).toUpperCase()}
-                </h3>
-              </div>
-              <button 
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 border border-[#E3EFE7]">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E3EFE7]">
+              <h3 className="font-['Sora'] font-bold text-base text-[#16241D]">
+                Update Ticket Status
+              </h3>
+              <button
                 onClick={() => setSelectedTicket(null)}
-                className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100"
+                className="w-8 h-8 rounded-full bg-[#FBFDF9] text-[#516459] flex items-center justify-center"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleAdminUpdate} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold uppercase tracking-wider text-[#0A2F1C]">
-                  Ticket Status *
+            <form onSubmit={handleUpdateStatus} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-[#516459] uppercase tracking-wider mb-1.5 text-[10.5px]">
+                  Ticket Status
                 </label>
                 <select
                   value={adminStatus}
                   onChange={(e) => setAdminStatus(e.target.value as TicketStatus)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#E4D9BE] bg-[#FBF8F1]/40 text-sm focus:ring-2 focus:ring-[#0F472A] focus:outline-none"
+                  className="w-full h-10 px-3 bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl text-xs font-bold text-[#16241D] focus:outline-none focus:border-[#3FAE7A]"
                 >
-                  <option value="pending">⏳ Pending (Awaiting Assignment)</option>
-                  <option value="in_progress">⚙️ In Progress (Technician Assigned)</option>
-                  <option value="resolved">✅ Resolved (Work Completed)</option>
+                  <option value="pending">Pending</option>
+                  <option value="in_progress">In Progress / Dispatched</option>
+                  <option value="resolved">Resolved / Closed</option>
                 </select>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold uppercase tracking-wider text-[#0A2F1C]">
-                  Resolution Notes / Work Update
+              <div>
+                <label className="block font-bold text-[#516459] uppercase tracking-wider mb-1.5 text-[10.5px]">
+                  Resolution Notes
                 </label>
                 <textarea
                   rows={3}
-                  placeholder="e.g. Technician dispatched, inverter ballast replaced, verified working..."
+                  placeholder="Technician dispatched, parts replaced, work order notes..."
                   value={adminNotes}
                   onChange={(e) => setAdminNotes(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-[#E4D9BE] bg-[#FBF8F1]/40 text-sm focus:ring-2 focus:ring-[#0F472A] focus:outline-none"
+                  className="w-full p-3 bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl text-xs font-semibold text-[#16241D] focus:outline-none focus:border-[#3FAE7A]"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#E4D9BE]">
+              <div className="pt-2 flex gap-2">
                 <button
                   type="button"
                   onClick={() => setSelectedTicket(null)}
-                  className="px-4 py-2 rounded-xl border border-neutral-300 text-sm font-semibold text-neutral-700 hover:bg-neutral-100"
+                  className="flex-1 py-3 rounded-xl bg-[#FBFDF9] border border-[#E3EFE7] font-['Sora'] font-bold text-xs text-[#516459]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={updateLoading}
-                  className="px-6 py-2 rounded-xl bg-[#0F472A] text-white font-bold text-sm hover:bg-[#0A2F1C] transition-all disabled:opacity-50 flex items-center gap-2"
+                  className="flex-1 py-3 rounded-xl bg-[#123528] text-white font-['Sora'] font-bold text-xs hover:bg-[#0D2A1F]"
                 >
-                  {updateLoading ? (
-                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="w-4 h-4 text-[#E7D19C]" />
-                  )}
-                  <span>Save Status</span>
+                  {updateLoading ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* Floating Bottom Dock */}
+      <nav className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex gap-1 bg-[#0D2A1F]/92 backdrop-blur-md border border-white/10 p-2 rounded-full shadow-2xl">
+        <button
+          onClick={() => navigate('/dashboard')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 11l8-7 8 7" />
+            <path d="M6 10v9a1 1 0 001 1h10a1 1 0 001-1v-9" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Home</span>
+        </button>
+        <button
+          onClick={() => navigate('/passes')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 9a3 3 0 013-3h14a3 3 0 013 3v10a3 3 0 01-3 3H5a3 3 0 01-3-3V9z" />
+            <path d="M9 14h6" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Passes</span>
+        </button>
+        <button
+          onClick={() => navigate('/facilities')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 21h18M3 7v14M21 7v14M6 3h12v4H6z" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Facilities</span>
+        </button>
+        <button
+          onClick={() => navigate('/household')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="9" cy="8" r="3" />
+            <path d="M4 20c0-3 2.5-5 5-5s5 2 5 5" />
+            <circle cx="17" cy="9" r="2.3" />
+            <path d="M15 20c0-2.4 1-4 3.5-4.3" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Staff</span>
+        </button>
+        <button
+          onClick={() => navigate('/notices')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 8a6 6 0 1112 0c0 4 1.5 6 2 6H4c0.5 0 2-2 2-6z" />
+            <path d="M10 20a2 2 0 004 0" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Notices</span>
+        </button>
+      </nav>
+
+      {/* Floating Emergency SOS Button */}
+      <div className="fixed right-4 bottom-5 w-[70px] h-[70px] z-50">
+        <svg className="absolute inset-0 w-[70px] h-[70px] -rotate-90 pointer-events-none" viewBox="0 0 70 70">
+          <circle cx="35" cy="35" r="31" stroke="rgba(18,53,40,0.12)" strokeWidth="4" fill="none" />
+          <circle
+            cx="35"
+            cy="35"
+            r="31"
+            stroke="#C23A38"
+            strokeWidth="4"
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={SOS_RING_LENGTH}
+            strokeDashoffset={sosProgressOffset}
+            style={{ transition: sosTransition }}
+          />
+        </svg>
+
+        <button
+          onMouseDown={handleSOSStart}
+          onMouseUp={handleSOSCancel}
+          onMouseLeave={handleSOSCancel}
+          onTouchStart={handleSOSStart}
+          onTouchEnd={handleSOSCancel}
+          onTouchCancel={handleSOSCancel}
+          className={`absolute top-[7px] left-[7px] w-14 h-14 rounded-full border-none bg-gradient-to-br from-[#F0645F] to-[#C23A38] flex flex-col items-center justify-center gap-0.5 cursor-pointer shadow-lg select-none touch-none ${
+            isHoldingSOS ? 'scale-95' : 'animate-pulse'
+          } ${sosActivated ? 'bg-gradient-to-br from-[#FF6E68] to-[#D2413F] scale-105' : ''}`}
+          aria-label="Hold for 5 seconds for SOS"
+        >
+          <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3l9 16H3L12 3z" />
+            <line x1="12" y1="9" x2="12" y2="14" />
+            <circle cx="12" cy="17" r="0.6" fill="white" stroke="none" />
+          </svg>
+          <span className="font-['Sora'] font-extrabold text-[8.5px] tracking-wider text-white">SOS</span>
+        </button>
+
+        {showSosToast && (
+          <div className="absolute bottom-20 right-0 bg-[#0D2A1F] border border-white/20 text-white text-xs font-semibold px-3 py-2 rounded-xl whitespace-nowrap shadow-xl">
+            Alert sent to gate security
+          </div>
+        )}
+      </div>
     </div>
   );
 };

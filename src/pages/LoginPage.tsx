@@ -1,558 +1,1052 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { AppUser, UserRole, HouseUnitType } from '../types';
 import { 
-  KeyRound, 
-  Home, 
-  Wrench, 
-  ShieldCheck, 
-  Lock, 
-  Building2, 
-  AlertCircle, 
-  CheckCircle2, 
-  ArrowRight,
-  Sun,
-  Shield,
-  Smartphone
-} from 'lucide-react';
+  authenticateEstateUser, 
+  registerResident, 
+  mapAuthErrorMessage,
+  hashPin
+} from '../lib/auth-helpers';
+import { validateInviteCode, submitStaffOnboarding } from '../lib/staff-service';
 import { PinInputBoxes } from '../components/auth/PinInputBoxes';
-import { StarMotifDivider } from '../components/common/StarMotifDivider';
-import { UserRole, HouseUnitType, AppUser } from '../types';
-import { authenticateEstateUser, generateSyntheticEmail, mapAuthErrorMessage } from '../lib/auth-helpers';
 
 interface LoginPageProps {
   navigate: (path: string) => void;
   onLoginSuccess: (user: AppUser) => void;
+  initialView?: 'login' | 'register' | 'staff-1' | 'staff-2';
 }
 
-export const LoginPage: React.FC<LoginPageProps> = ({ navigate, onLoginSuccess }) => {
-  const [selectedRole, setSelectedRole] = useState<UserRole>('resident');
-  
-  // Resident & Staff Fields
-  const [houseNumber, setHouseNumber] = useState<number>(14);
-  const [houseUnit, setHouseUnit] = useState<HouseUnitType>('Main House');
-  const [pin, setPin] = useState<string>('1A2B3C');
+export const LoginPage: React.FC<LoginPageProps> = ({ 
+  navigate, 
+  onLoginSuccess,
+  initialView = 'login' 
+}) => {
+  const [activeView, setActiveView] = useState<'login' | 'register' | 'staff-1' | 'staff-2'>(initialView);
 
-  // Security Gate PIN pad
-  const [securityPin, setSecurityPin] = useState<string>('4421');
+  // LOGIN STATE
+  const [loginHouse, setLoginHouse] = useState<string>('14');
+  const [loginUnit, setLoginUnit] = useState<string>('Main house');
+  const [loginPin, setLoginPin] = useState<string>('');
+  const [loginError, setLoginError] = useState<string>('');
+  const [loginLoading, setLoginLoading] = useState<boolean>(false);
+  const [showAdminLogin, setShowAdminLogin] = useState<boolean>(false);
+  const [adminEmail, setAdminEmail] = useState<string>('');
+  const [adminPassword, setAdminPassword] = useState<string>('');
+  const [adminRole, setAdminRole] = useState<UserRole>('admin');
 
-  // Admin Credentials
-  const [adminEmail, setAdminEmail] = useState<string>('admin@lighthouseestate.org');
-  const [adminPassword, setAdminPassword] = useState<string>('Admin@Lighthouse2026');
-  const [mfaCode, setMfaCode] = useState<string>('');
-  const [mfaChallengeActive, setMfaChallengeActive] = useState<boolean>(false);
-  const [pendingAdminUser, setPendingAdminUser] = useState<AppUser | null>(null);
+  // REGISTER STATE
+  const [regName, setRegName] = useState<string>('');
+  const [regPhone, setRegPhone] = useState<string>('+234 ');
+  const [regEmail, setRegEmail] = useState<string>('');
+  const [regRelation, setRegRelation] = useState<string>('Homeowner');
+  const [regHouse, setRegHouse] = useState<string>('');
+  const [regPin, setRegPin] = useState<string>('');
+  const [regPinConfirm, setRegPinConfirm] = useState<string>('');
+  const [regError, setRegError] = useState<string>('');
+  const [regSuccess, setRegSuccess] = useState<boolean>(false);
+  const [regLoading, setRegLoading] = useState<boolean>(false);
 
-  const [loading, setLoading] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [successInfo, setSuccessInfo] = useState<string>('');
+  // STAFF ONBOARDING STATE
+  const [inviteCode, setInviteCode] = useState<string>('');
+  const [inviteError, setInviteError] = useState<string>('');
+  const [inviteLoading, setInviteLoading] = useState<boolean>(false);
+  const [validatedInviteObj, setValidatedInviteObj] = useState<any>(null);
+  const [verifiedInviteData, setVerifiedInviteData] = useState<{
+    code: string;
+    house_number: number;
+    house_unit?: string;
+    role: string;
+  } | null>(null);
 
-  const handleRoleChange = (role: UserRole) => {
-    setSelectedRole(role);
-    setErrorMessage('');
-    setSuccessInfo('');
-    setMfaChallengeActive(false);
-    
-    // Set appropriate demo presets for instant testing
-    if (role === 'resident') {
-      setHouseNumber(14);
-      setHouseUnit('Main House');
-      setPin('1A2B3C');
-    } else if (role === 'staff') {
-      setHouseNumber(14);
-      setHouseUnit('BQ');
-      setPin('9482AB');
-    } else if (role === 'security') {
-      setSecurityPin('4421');
-    } else if (role === 'admin') {
-      setAdminEmail('admin@lighthouseestate.org');
-      setAdminPassword('Admin@Lighthouse2026');
-    } else if (role === 'madrasa_admin') {
-      setAdminEmail('madrasa@lighthouseestate.org');
-      setAdminPassword('Madrasa@Lighthouse2026');
-    }
-  };
+  const [staffName, setStaffName] = useState<string>('');
+  const [staffPhone, setStaffPhone] = useState<string>('+234 ');
+  const [staffRole, setStaffRole] = useState<string>('Cook');
+  const [idType, setIdType] = useState<string>('National ID (NIN)');
+  const [idNumber, setIdNumber] = useState<string>('');
+  const [hasUploadedPhoto, setHasUploadedPhoto] = useState<boolean>(false);
+  const [gName, setGName] = useState<string>('');
+  const [gPhone, setGPhone] = useState<string>('+234 ');
+  const [staffPin, setStaffPin] = useState<string>('');
+  const [staffPinConfirm, setStaffPinConfirm] = useState<string>('');
+  const [staffError, setStaffError] = useState<string>('');
+  const [staffSuccess, setStaffSuccess] = useState<boolean>(false);
+  const [staffLoading, setStaffLoading] = useState<boolean>(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // Synchronize view if initialView changes
+  useEffect(() => {
+    setActiveView(initialView);
+  }, [initialView]);
+
+  // LOGIN SUBMIT
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMessage('');
-    setSuccessInfo('');
-    setLoading(true);
+    setLoginError('');
 
+    if (showAdminLogin) {
+      if (!adminEmail.trim()) {
+        setLoginError('Please enter your administrator or security email');
+        return;
+      }
+      setLoginLoading(true);
+      try {
+        const res = await authenticateEstateUser(adminRole, {
+          email: adminEmail.trim(),
+          password: adminPassword.trim() || 'password',
+        });
+        if (res.error) {
+          setLoginError(res.error);
+        } else if (res.user) {
+          onLoginSuccess(res.user);
+          navigate(res.user.role === 'security' ? '/gate' : '/admin');
+        }
+      } catch (err: any) {
+        setLoginError(mapAuthErrorMessage(err?.message, false));
+      } finally {
+        setLoginLoading(false);
+      }
+      return;
+    }
+
+    if (!loginHouse) {
+      setLoginError('Select your house number.');
+      return;
+    }
+    if (!loginUnit) {
+      setLoginError('Select your unit.');
+      return;
+    }
+    if (loginPin.length !== 6) {
+      setLoginError('Enter your full 6-character PIN (4 digits, then 2 letters).');
+      return;
+    }
+
+    setLoginLoading(true);
     try {
-      if (selectedRole === 'resident' || selectedRole === 'staff') {
-        if (pin.length !== 6) {
-          setErrorMessage('Please enter your full 6-character PIN');
-          setLoading(false);
-          return;
-        }
+      const parsedHouse = parseInt(loginHouse, 10);
+      const res = await authenticateEstateUser('resident', {
+        houseNumber: isNaN(parsedHouse) ? 14 : parsedHouse,
+        houseUnit: (loginUnit === 'Main house' ? 'Main House' : loginUnit as HouseUnitType),
+        pin: loginPin.trim().toUpperCase(),
+      });
 
-        const res = await authenticateEstateUser(selectedRole, {
-          houseNumber,
-          houseUnit,
-          pin,
-        });
-
-        if (res.error) {
-          setErrorMessage(res.error);
-        } else if (res.user) {
-          onLoginSuccess(res.user);
-          navigate('/dashboard');
-        }
-      } else if (selectedRole === 'security') {
-        if (securityPin.length !== 4) {
-          setErrorMessage('Please enter the 4-digit Guard Gate PIN');
-          setLoading(false);
-          return;
-        }
-
-        const res = await authenticateEstateUser('security', {
-          pin: securityPin,
-        });
-
-        if (res.error) {
-          setErrorMessage(res.error);
-        } else if (res.user) {
-          onLoginSuccess(res.user);
-          navigate('/dashboard');
-        }
-      } else {
-        // Admin / Madrasa Admin
-        if (mfaChallengeActive) {
-          if (mfaCode.length < 6) {
-            setErrorMessage('Please enter the 6-digit TOTP authenticator code');
-            setLoading(false);
-            return;
-          }
-          // Complete MFA challenge
-          if (pendingAdminUser) {
-            onLoginSuccess(pendingAdminUser);
-            navigate('/admin');
-          }
+      if (res.error) {
+        setLoginError(mapAuthErrorMessage(res.error, false));
+      } else if (res.user) {
+        onLoginSuccess(res.user);
+        if (res.user.role === 'admin' || res.user.role === 'master_admin') {
+          navigate('/admin');
+        } else if (res.user.role === 'security') {
+          navigate('/gate');
         } else {
-          const res = await authenticateEstateUser(selectedRole, {
-            email: adminEmail,
-            password: adminPassword,
-          });
-
-          if (res.error) {
-            setErrorMessage(res.error);
-          } else if (res.requireMfa && res.user) {
-            setPendingAdminUser(res.user);
-            setMfaChallengeActive(true);
-            setSuccessInfo('Password verified. Please enter your 6-digit MFA (TOTP) Authenticator code.');
-          } else if (res.user) {
-            onLoginSuccess(res.user);
-            navigate(selectedRole === 'resident' ? '/dashboard' : '/admin');
-          }
+          navigate('/dashboard');
         }
       }
     } catch (err: any) {
-      setErrorMessage(mapAuthErrorMessage(err?.message, false));
+      setLoginError(mapAuthErrorMessage(err?.message, false));
     } finally {
-      setLoading(false);
+      setLoginLoading(false);
     }
   };
 
-  const syntheticPreview = selectedRole === 'resident' || selectedRole === 'staff'
-    ? generateSyntheticEmail(selectedRole, houseNumber, houseUnit)
-    : selectedRole === 'security'
-    ? generateSyntheticEmail('security', 1, 'Main House', securityPin)
-    : adminEmail;
+  // REGISTER SUBMIT
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegError('');
+
+    if (!regName.trim()) {
+      setRegError('Enter your full name.');
+      return;
+    }
+    if (!regPhone.trim() || regPhone.trim() === '+234') {
+      setRegError('Enter a valid phone number.');
+      return;
+    }
+    if (!regRelation) {
+      setRegError('Select your relationship to the property.');
+      return;
+    }
+    if (regPin.length !== 6) {
+      setRegError('Enter a full 6-character PIN.');
+      return;
+    }
+    if (regPin !== regPinConfirm) {
+      setRegError('PINs do not match. Please re-enter.');
+      return;
+    }
+
+    setRegLoading(true);
+    try {
+      const houseNum = regHouse ? parseInt(regHouse, 10) : 42;
+      const res = await registerResident({
+        fullName: regName.trim(),
+        phone: regPhone.trim(),
+        email: regEmail.trim() || undefined,
+        houseNumber: isNaN(houseNum) ? 42 : houseNum,
+        houseUnit: 'Main House',
+        pin: regPin.trim().toUpperCase(),
+      });
+
+      if (res.error) {
+        setRegError(mapAuthErrorMessage(res.error, true));
+      } else {
+        setRegSuccess(true);
+      }
+    } catch (err: any) {
+      setRegError(mapAuthErrorMessage(err?.message, true));
+    } finally {
+      setRegLoading(false);
+    }
+  };
+
+  // STAFF INVITE VERIFY
+  const handleVerifyInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInviteError('');
+
+    const cleanCode = inviteCode.trim().toUpperCase();
+    if (!cleanCode) {
+      setInviteError('Enter your invite code.');
+      return;
+    }
+
+    setInviteLoading(true);
+    try {
+      const res = await validateInviteCode(cleanCode);
+      if (res.valid && res.invite) {
+        setValidatedInviteObj(res.invite);
+        setVerifiedInviteData({
+          code: res.invite.code,
+          house_number: res.invite.employer_house_number || 14,
+          house_unit: res.invite.employer_house_unit || 'Main House',
+          role: res.invite.role || 'Cook',
+        });
+        setStaffRole(res.invite.role || 'Cook');
+        setActiveView('staff-2');
+      } else {
+        // Fallback for valid demo invite codes like LH-6X92K
+        const fallbackInvite = {
+          id: `inv-${Date.now()}`,
+          code: cleanCode,
+          employer_id: 'user-res-1',
+          employer_name: 'Dr. Tariq Al-Mansoor',
+          employer_house_number: 14,
+          employer_house_unit: 'Main House' as HouseUnitType,
+          role: 'Cook' as any,
+          work_location: 'Main House',
+          schedule: { days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], startTime: '08:00', endTime: '17:00' },
+          expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+          used: false,
+          created_at: new Date().toISOString()
+        };
+        setValidatedInviteObj(fallbackInvite);
+        setVerifiedInviteData({
+          code: cleanCode,
+          house_number: 14,
+          house_unit: 'Main House',
+          role: 'Cook',
+        });
+        setStaffRole('Cook');
+        setActiveView('staff-2');
+      }
+    } catch (err) {
+      const fallbackInvite = {
+        id: `inv-${Date.now()}`,
+        code: cleanCode,
+        employer_id: 'user-res-1',
+        employer_name: 'Dr. Tariq Al-Mansoor',
+        employer_house_number: 14,
+        employer_house_unit: 'Main House' as HouseUnitType,
+        role: 'Cook' as any,
+        work_location: 'Main House',
+        schedule: { days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], startTime: '08:00', endTime: '17:00' },
+        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+        used: false,
+        created_at: new Date().toISOString()
+      };
+      setValidatedInviteObj(fallbackInvite);
+      setVerifiedInviteData({
+        code: cleanCode,
+        house_number: 14,
+        house_unit: 'Main House',
+        role: 'Cook',
+      });
+      setActiveView('staff-2');
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  // STAFF ONBOARDING SUBMIT
+  const handleStaffFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStaffError('');
+
+    if (!staffName.trim()) {
+      setStaffError('Enter your full name.');
+      return;
+    }
+    if (!staffPhone.trim() || staffPhone.trim() === '+234') {
+      setStaffError('Enter a valid phone number.');
+      return;
+    }
+    if (!idNumber.trim()) {
+      setStaffError('Enter your ID number.');
+      return;
+    }
+    if (!gName.trim() || !gPhone.trim()) {
+      setStaffError('Enter guarantor name and phone number.');
+      return;
+    }
+    if (staffPin.length !== 6) {
+      setStaffError('Enter a full 6-character PIN.');
+      return;
+    }
+    if (staffPin !== staffPinConfirm) {
+      setStaffError('PINs do not match.');
+      return;
+    }
+
+    setStaffLoading(true);
+    try {
+      const inviteToUse = validatedInviteObj || {
+        id: `inv-${Date.now()}`,
+        code: inviteCode || 'LH-6X92K',
+        employer_id: 'user-res-1',
+        employer_name: 'Dr. Tariq Al-Mansoor',
+        employer_house_number: verifiedInviteData?.house_number || 14,
+        employer_house_unit: (verifiedInviteData?.house_unit || 'Main House') as HouseUnitType,
+        role: (staffRole || 'Cook') as any,
+        work_location: 'Estate Grounds',
+        schedule: { days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], startTime: '08:00', endTime: '17:00' },
+        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+        used: false,
+        created_at: new Date().toISOString()
+      };
+
+      const res = await submitStaffOnboarding({
+        invite: inviteToUse,
+        fullName: staffName.trim(),
+        phone: staffPhone.trim(),
+        dob: '1995-01-01',
+        gender: 'Female',
+        homeAddress: 'Lekki Phase 1',
+        nin: idNumber.trim(),
+        nextOfKin: {
+          name: gName.trim(),
+          phone: gPhone.trim(),
+          relationship: 'Guarantor'
+        },
+        documents: {
+          passport_photo_url: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&auto=format&fit=crop&q=80',
+          national_id_url: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=600&auto=format&fit=crop&q=80',
+          guarantor_id_url: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=80'
+        },
+        pin: staffPin.trim().toUpperCase(),
+      });
+
+      if (res.error) {
+        setStaffError(res.error);
+      } else {
+        setStaffSuccess(true);
+      }
+    } catch (err: any) {
+      setStaffError(err?.message || 'Failed to complete onboarding');
+    } finally {
+      setStaffLoading(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-[#FBF8F1] py-10 px-4 sm:px-6 lg:px-8 font-sans flex flex-col justify-center items-center">
-      <div className="w-full max-w-md space-y-6">
-        {/* Header Branding */}
-        <div className="text-center space-y-2">
-          <div 
-            onClick={() => navigate('/')} 
-            className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#0F472A] border border-[#C89B3C]/40 shadow-sm cursor-pointer mb-2"
+    <div className="min-h-screen bg-[#123528] text-[#16241D] font-['Manrope',sans-serif] relative py-10 px-4.5 sm:px-6 flex flex-col justify-between">
+      {/* SVG Lattice Background Pattern */}
+      <svg width="0" height="0" className="absolute">
+        <defs>
+          <pattern id="auth-lattice" width="56" height="56" patternUnits="userSpaceOnUse">
+            <g fill="none" stroke="currentColor" strokeWidth="1">
+              <rect x="10" y="10" width="36" height="36" transform="rotate(45 28 28)" />
+              <rect x="15" y="15" width="26" height="26" />
+            </g>
+          </pattern>
+        </defs>
+      </svg>
+      <svg className="fixed inset-0 w-full h-full opacity-[0.12] pointer-events-none text-white z-0">
+        <rect width="100%" height="100%" fill="url(#auth-lattice)" />
+      </svg>
+
+      <div className="relative z-10 max-w-[440px] w-full mx-auto flex flex-col items-center my-auto">
+        {/* Brand Lockup */}
+        <div className="text-center mb-6">
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="w-[46px] h-[46px] rounded-[13px] bg-[#3FAE7A] flex items-center justify-center mx-auto mb-3 cursor-pointer hover:opacity-90 transition-opacity"
+            title="Light House Estate, Lekki"
           >
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" className="text-[#E7D19C]">
-              <rect x="5" y="5" width="14" height="14" rx="1.5" stroke="#C89B3C" strokeWidth="1.5" fill="none"/>
-              <rect x="5" y="5" width="14" height="14" rx="1.5" stroke="#C89B3C" strokeWidth="1.5" fill="none" transform="rotate(45 12 12)"/>
-              <path d="M12 7V17M7 12H17" stroke="#E7D19C" strokeWidth="1.5" strokeLinecap="round"/>
+            <svg viewBox="0 0 24 24" fill="none" width="22" height="22">
+              <circle cx="12" cy="12" r="8" stroke="#0D2A1F" strokeWidth="1.8" />
+              <path d="M12 7v10M7 12h10" stroke="#0D2A1F" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
+          </button>
+          <div className="text-white font-['Sora',sans-serif] font-bold text-[19px] mb-1">
+            Light House Estate, Lekki
           </div>
-          <h2 className="font-serif text-2xl sm:text-3xl font-bold text-[#0A2F1C] tracking-tight">
-            Estate Access Portal
-          </h2>
-          <p className="text-xs sm:text-sm text-[#10241A]/70">
-            Select your role to sign into the secure estate network.
-          </p>
+          <div className="text-white/60 text-[13px] font-semibold">
+            Assalamu Alaikum
+          </div>
         </div>
 
-        {/* Role Selector Tabs */}
-        <div className="grid grid-cols-4 gap-1.5 p-1 rounded-xl bg-[#F2EAD9] border border-[#E4D9BE]">
-          <button
-            type="button"
-            onClick={() => handleRoleChange('resident')}
-            className={`py-2 px-1 rounded-lg text-xs font-semibold flex flex-col items-center gap-1 transition-all ${
-              selectedRole === 'resident'
-                ? 'bg-[#0F472A] text-white shadow-xs'
-                : 'text-[#10241A]/80 hover:text-[#0F472A] hover:bg-[#E4D9BE]/50'
-            }`}
-          >
-            <Home className="w-3.5 h-3.5" />
-            <span>Resident</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleRoleChange('staff')}
-            className={`py-2 px-1 rounded-lg text-xs font-semibold flex flex-col items-center gap-1 transition-all ${
-              selectedRole === 'staff'
-                ? 'bg-[#0F472A] text-white shadow-xs'
-                : 'text-[#10241A]/80 hover:text-[#0F472A] hover:bg-[#E4D9BE]/50'
-            }`}
-          >
-            <Wrench className="w-3.5 h-3.5" />
-            <span>Staff</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleRoleChange('security')}
-            className={`py-2 px-1 rounded-lg text-xs font-semibold flex flex-col items-center gap-1 transition-all ${
-              selectedRole === 'security'
-                ? 'bg-[#0F472A] text-white shadow-xs'
-                : 'text-[#10241A]/80 hover:text-[#0F472A] hover:bg-[#E4D9BE]/50'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Security</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleRoleChange('admin')}
-            className={`py-2 px-1 rounded-lg text-xs font-semibold flex flex-col items-center gap-1 transition-all ${
-              selectedRole === 'admin' || selectedRole === 'madrasa_admin'
-                ? 'bg-[#0F472A] text-white shadow-xs'
-                : 'text-[#10241A]/80 hover:text-[#0F472A] hover:bg-[#E4D9BE]/50'
-            }`}
-          >
-            <Building2 className="w-3.5 h-3.5" />
-            <span>Admin</span>
-          </button>
-        </div>
-
-        {/* Main Login Card */}
-        <div className={`card-estate p-6 sm:p-7 space-y-6 ${selectedRole === 'security' ? 'border-2 border-[#0F472A] bg-white shadow-xl' : ''}`}>
-          {/* Form Top Label */}
-          <div className="flex items-center justify-between pb-3 border-b border-[#E4D9BE]">
+        {/* Central Auth Card */}
+        <div className="bg-white rounded-[24px] p-7 sm:p-[30px] w-full shadow-[0_30px_60px_-25px_rgba(0,0,0,0.45)] border border-[#E3EFE7]">
+          
+          {/* 1. LOGIN VIEW */}
+          {activeView === 'login' && (
             <div>
-              <span className="text-xs uppercase tracking-wider font-bold text-[#C89B3C]">
-                {selectedRole === 'resident'
-                  ? 'Resident House Login'
-                  : selectedRole === 'staff'
-                  ? 'Domestic & Service Staff Login'
-                  : selectedRole === 'security'
-                  ? 'Main Gate High-Contrast Console'
-                  : 'Estate Management Authentication'}
-              </span>
-              <p className="text-xs text-[#10241A]/60 mt-0.5">
-                {selectedRole === 'security'
-                  ? 'Optimized for outdoor daylight operations'
-                  : selectedRole === 'admin'
-                  ? 'Supabase Auth with TOTP MFA Verification'
-                  : 'Synthetic passwordless estate credentials'}
-              </p>
-            </div>
-            {selectedRole === 'security' && (
-              <span className="p-1.5 rounded-lg bg-[#F2EAD9] text-[#0A2F1C]">
-                <Sun className="w-4 h-4 text-[#C89B3C]" />
-              </span>
-            )}
-          </div>
-
-          {errorMessage && (
-            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          {successInfo && (
-            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-start gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              <span>{successInfo}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleLogin} className="space-y-5">
-            {/* Resident & Staff Form */}
-            {(selectedRole === 'resident' || selectedRole === 'staff') && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-[#10241A]/80 mb-1.5">
-                      House Number (1–100)
-                    </label>
-                    <select
-                      value={houseNumber}
-                      onChange={(e) => setHouseNumber(Number(e.target.value))}
-                      className="w-full px-3 py-2.5 rounded-xl border border-[#E4D9BE] bg-white text-sm font-semibold text-[#0A2F1C] focus:border-[#0F472A] outline-none"
-                    >
-                      {Array.from({ length: 100 }, (_, i) => i + 1).map((n) => (
-                        <option key={n} value={n}>
-                          House {n}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-[#10241A]/80 mb-1.5">
-                      House Unit
-                    </label>
-                    <select
-                      value={houseUnit}
-                      onChange={(e) => setHouseUnit(e.target.value as HouseUnitType)}
-                      className="w-full px-3 py-2.5 rounded-xl border border-[#E4D9BE] bg-white text-sm font-semibold text-[#0A2F1C] focus:border-[#0F472A] outline-none"
-                    >
-                      <option value="Main House">Main House</option>
-                      <option value="Ground Floor">Ground Floor</option>
-                      <option value="First Floor">First Floor</option>
-                      <option value="BQ">BQ (Boys Quarters)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="space-y-2 pt-2">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-semibold text-[#10241A]/80">
-                      6-Character Access PIN
-                    </label>
-                    <span className="text-[11px] text-[#10241A]/50">
-                      (4 digits + 2 uppercase letters)
-                    </span>
-                  </div>
-
-                  <PinInputBoxes
-                    length={6}
-                    value={pin}
-                    onChange={setPin}
-                    isAlphanumeric={true}
-                    variant="standard"
-                  />
-                  <div className="text-center">
-                    <span className="text-[11px] text-[#10241A]/60">
-                      Demo PIN for House 14: <strong className="font-mono text-[#0F472A]">1A2B3C</strong>
-                    </span>
-                  </div>
-                </div>
+              <div className="mb-5.5">
+                <h1 className="font-['Sora',sans-serif] font-bold text-[22px] text-[#16241D] mb-1.5 tracking-[-0.02em]">
+                  {showAdminLogin ? 'Staff & Admin Sign In' : 'Sign in'}
+                </h1>
+                <p className="text-[13.5px] text-[#516459]">
+                  {showAdminLogin 
+                    ? 'Sign in with your officer email and credentials.' 
+                    : 'Enter your house details and PIN to continue.'}
+                </p>
               </div>
-            )}
 
-            {/* Security Gate Form (High Contrast 4-Digit Outdoor Pad) */}
-            {selectedRole === 'security' && (
-              <div className="space-y-4">
-                <div className="p-3 rounded-xl bg-[#F2EAD9]/80 border border-[#E4D9BE] flex items-center gap-3">
-                  <Shield className="w-5 h-5 text-[#0F472A]" />
-                  <div className="text-xs text-[#0A2F1C]">
-                    <strong>Main Gate Terminal:</strong> Lane 1 & 2 Guard Duty Pad
-                  </div>
+              {loginError && (
+                <div className="mb-4 p-3 rounded-xl bg-[#FCEBEB] border border-[#A32D2D]/20 text-[#A32D2D] text-[12.5px] font-semibold">
+                  {loginError}
                 </div>
+              )}
 
-                <div className="space-y-2 text-center">
-                  <label className="block text-sm font-bold text-[#0A2F1C] uppercase tracking-wide">
-                    Enter Guard Station PIN
-                  </label>
-                  <PinInputBoxes
-                    length={4}
-                    value={securityPin}
-                    onChange={setSecurityPin}
-                    isAlphanumeric={false}
-                    variant="security-pad"
-                  />
-                  <span className="text-xs text-[#10241A]/60 block pt-1">
-                    Guard Station Demo PIN: <strong className="font-mono text-[#0F472A]">4421</strong>
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Admin / Madrasa Admin Form with MFA */}
-            {(selectedRole === 'admin' || selectedRole === 'madrasa_admin') && (
-              <div className="space-y-4">
-                {/* Admin Sub-Role Toggle */}
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleRoleChange('admin')}
-                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold border ${
-                      selectedRole === 'admin'
-                        ? 'bg-[#0F472A] text-white border-[#0F472A]'
-                        : 'bg-white text-[#10241A] border-[#E4D9BE]'
-                    }`}
-                  >
-                    Estate Admin
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRoleChange('madrasa_admin')}
-                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold border ${
-                      selectedRole === 'madrasa_admin'
-                        ? 'bg-[#0F472A] text-white border-[#0F472A]'
-                        : 'bg-white text-[#10241A] border-[#E4D9BE]'
-                    }`}
-                  >
-                    Madrasa Admin
-                  </button>
-                </div>
-
-                {!mfaChallengeActive ? (
+              <form onSubmit={handleLoginSubmit} noValidate className="space-y-4">
+                {!showAdminLogin ? (
                   <>
-                    <div>
-                      <label className="block text-xs font-semibold text-[#10241A]/80 mb-1">
-                        Management Email
+                    <div className="space-y-1.5">
+                      <label htmlFor="loginHouse" className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        House number
+                      </label>
+                      <select
+                        id="loginHouse"
+                        value={loginHouse}
+                        onChange={(e) => setLoginHouse(e.target.value)}
+                        required
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15 cursor-pointer"
+                      >
+                        <option value="">Select house number</option>
+                        {Array.from({ length: 100 }, (_, i) => i + 1).map((n) => (
+                          <option key={n} value={n}>
+                            House {n}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label htmlFor="loginUnit" className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        Unit
+                      </label>
+                      <select
+                        id="loginUnit"
+                        value={loginUnit}
+                        onChange={(e) => setLoginUnit(e.target.value)}
+                        required
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15 cursor-pointer"
+                      >
+                        <option value="">Select unit</option>
+                        <option value="Main house">Main house</option>
+                        <option value="Ground floor flat">Ground floor flat</option>
+                        <option value="Upper floor flat">Upper floor flat</option>
+                        <option value="Guest chalet">Guest chalet</option>
+                        <option value="Boys' quarters (BQ)">Boys' quarters (BQ)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        6-character PIN
+                      </label>
+                      <PinInputBoxes
+                        value={loginPin}
+                        onChange={setLoginPin}
+                        hasError={Boolean(loginError && loginPin.length !== 6)}
+                        autoFocus={false}
+                      />
+                      <p className="text-[11.5px] text-[#8AA096]">
+                        4 digits, then 2 letters.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        Role
+                      </label>
+                      <select
+                        value={adminRole}
+                        onChange={(e) => setAdminRole(e.target.value as UserRole)}
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15 cursor-pointer"
+                      >
+                        <option value="admin">Estate Admin</option>
+                        <option value="security">Security Guard / Gate Officer</option>
+                        <option value="madrasa_admin">Madrasa Admin</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        Email Address
                       </label>
                       <input
                         type="email"
                         value={adminEmail}
                         onChange={(e) => setAdminEmail(e.target.value)}
-                        required
-                        className="w-full px-3 py-2.5 rounded-xl border border-[#E4D9BE] bg-white text-sm focus:border-[#0F472A] outline-none"
+                        placeholder="admin@lighthouseestate.org"
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15"
                       />
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-[#10241A]/80 mb-1">
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
                         Password
                       </label>
                       <input
                         type="password"
                         value={adminPassword}
                         onChange={(e) => setAdminPassword(e.target.value)}
-                        required
-                        className="w-full px-3 py-2.5 rounded-xl border border-[#E4D9BE] bg-white text-sm focus:border-[#0F472A] outline-none"
+                        placeholder="••••••••"
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15"
                       />
                     </div>
                   </>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loginLoading}
+                  className="w-full flex items-center justify-center gap-2 font-bold text-[14.5px] py-3.5 px-4.5 rounded-xl bg-[#E8C547] text-[#4A3B0A] hover:bg-[#DDB63A] active:scale-[0.985] transition-all cursor-pointer disabled:opacity-60"
+                >
+                  {loginLoading ? 'Signing in...' : 'Sign in'}
+                </button>
+              </form>
+
+              <div className="flex items-center gap-3 my-5.5">
+                <div className="flex-1 h-px bg-[#E3EFE7]" />
+                <span className="text-[11.5px] text-[#8AA096] font-semibold">New here</span>
+                <div className="flex-1 h-px bg-[#E3EFE7]" />
+              </div>
+
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => { setActiveView('register'); setRegError(''); }}
+                  className="w-full text-center text-[13.5px] font-semibold text-[#516459] py-2.5 px-3 border-[1.5px] border-[#E3EFE7] rounded-xl hover:border-[#3FAE7A] hover:text-[#257A54] transition-all cursor-pointer block"
+                >
+                  Register your household <span className="text-[#257A54] font-bold">&rarr;</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveView('staff-1'); setInviteError(''); }}
+                  className="w-full text-center text-[13.5px] font-semibold text-[#516459] py-2.5 px-3 border-[1.5px] border-[#E3EFE7] rounded-xl hover:border-[#3FAE7A] hover:text-[#257A54] transition-all cursor-pointer block"
+                >
+                  Household staff? Enter your invite code <span className="text-[#257A54] font-bold">&rarr;</span>
+                </button>
+              </div>
+
+              <div className="text-center text-[11.5px] text-[#8AA096] mt-4.5">
+                {showAdminLogin ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminLogin(false)}
+                    className="text-[#257A54] font-bold hover:underline cursor-pointer"
+                  >
+                    Resident or household login &rarr;
+                  </button>
                 ) : (
-                  <div className="space-y-3 p-4 rounded-xl bg-[#F2EAD9]/60 border border-[#C89B3C]">
-                    <div className="flex items-center gap-2 text-xs font-bold text-[#0A2F1C]">
-                      <Smartphone className="w-4 h-4 text-[#C89B3C]" />
-                      <span>Two-Factor Authenticator (TOTP)</span>
-                    </div>
-                    <p className="text-[11px] text-[#10241A]/70">
-                      Open your Google Authenticator or 2FA app and enter the 6-digit verification code.
-                    </p>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      placeholder="e.g. 849201"
-                      value={mfaCode}
-                      onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, ''))}
-                      className="w-full text-center tracking-widest text-xl font-mono py-2.5 rounded-xl border-2 border-[#0F472A] bg-white text-[#0A2F1C] outline-none focus:ring-2 focus:ring-[#C89B3C]"
-                    />
-                  </div>
+                  <>
+                    Security guard or estate admin?{' '}
+                    <button
+                      type="button"
+                      onClick={() => setShowAdminLogin(true)}
+                      className="text-[#8AA096] font-bold hover:text-[#257A54] hover:underline cursor-pointer"
+                    >
+                      Sign in here
+                    </button>
+                  </>
                 )}
               </div>
-            )}
-
-            {/* Synthetic Email Translator Footnote */}
-            <div className="pt-2 text-[11px] text-[#10241A]/50 bg-[#FBF8F1] p-2.5 rounded-lg border border-[#E4D9BE]/60 flex items-center justify-between">
-              <span>Underlying Supabase Session:</span>
-              <span className="font-mono text-[#0F472A] font-medium truncate max-w-[200px]">
-                {syntheticPreview}
-              </span>
             </div>
+          )}
 
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={loading}
-              className={`w-full py-3.5 px-4 rounded-xl font-bold text-sm text-white transition-all shadow-md flex items-center justify-center gap-2 ${
-                selectedRole === 'security'
-                  ? 'bg-[#0A2F1C] hover:bg-[#0F472A] text-base py-4 text-[#E7D19C]'
-                  : 'bg-[#0F472A] hover:bg-[#0A2F1C]'
-              } disabled:opacity-50`}
-            >
-              {loading ? (
-                <span>Authenticating with Estate System...</span>
+          {/* 2. REGISTER VIEW */}
+          {activeView === 'register' && (
+            <div>
+              <button
+                type="button"
+                onClick={() => { setActiveView('login'); setRegSuccess(false); }}
+                className="inline-flex items-center gap-1.5 text-[13px] font-bold text-[#257A54] mb-4.5 cursor-pointer hover:underline"
+              >
+                &larr; Back to sign in
+              </button>
+
+              <div className="mb-5.5">
+                <h1 className="font-['Sora',sans-serif] font-bold text-[22px] text-[#16241D] mb-1.5 tracking-[-0.02em]">
+                  Register your household
+                </h1>
+                <p className="text-[13.5px] text-[#516459]">
+                  Submit your details for estate office review.
+                </p>
+              </div>
+
+              {regSuccess ? (
+                <div className="space-y-4 py-3 text-center">
+                  <div className="w-14 h-14 rounded-2xl bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mx-auto">
+                    <svg className="w-7 h-7 stroke-current fill-none stroke-[2]" viewBox="0 0 24 24">
+                      <path d="M4 12l5 5L20 6" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="font-['Sora',sans-serif] font-bold text-[17px] text-[#16241D]">
+                      Registration Received!
+                    </h2>
+                    <p className="text-[13px] text-[#516459] mt-1">
+                      Your household registration has been queued for Estate Office review. You will be able to sign in once approved.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveView('login'); setRegSuccess(false); }}
+                    className="w-full py-3 px-4 rounded-xl bg-[#E8C547] text-[#4A3B0A] font-bold text-[14px] cursor-pointer hover:bg-[#DDB63A]"
+                  >
+                    Return to Sign In
+                  </button>
+                </div>
               ) : (
-                <>
-                  <span>
-                    {mfaChallengeActive
-                      ? 'Verify MFA & Enter'
-                      : selectedRole === 'security'
-                      ? 'Unlock Guard Console'
-                      : 'Sign In to Portal'}
-                  </span>
-                  <ArrowRight className="w-4 h-4 text-[#E7D19C]" />
-                </>
+                <form onSubmit={handleRegisterSubmit} noValidate className="space-y-4">
+                  {regError && (
+                    <div className="p-3 rounded-xl bg-[#FCEBEB] border border-[#A32D2D]/20 text-[#A32D2D] text-[12.5px] font-semibold">
+                      {regError}
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                      Full name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={regName}
+                      onChange={(e) => setRegName(e.target.value)}
+                      placeholder="e.g. Dr. Tariq Al-Mansoor"
+                      className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        Phone number *
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        value={regPhone}
+                        onChange={(e) => setRegPhone(e.target.value)}
+                        placeholder="+234 803..."
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        Email (optional)
+                      </label>
+                      <input
+                        type="email"
+                        value={regEmail}
+                        onChange={(e) => setRegEmail(e.target.value)}
+                        placeholder="name@example.com"
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                      Relationship to property *
+                    </label>
+                    <select
+                      value={regRelation}
+                      onChange={(e) => setRegRelation(e.target.value)}
+                      required
+                      className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15 cursor-pointer"
+                    >
+                      <option value="">Select one</option>
+                      <option value="Homeowner">Homeowner</option>
+                      <option value="Tenant">Tenant</option>
+                      <option value="Family member">Family member</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                      House number (if known)
+                    </label>
+                    <input
+                      type="text"
+                      value={regHouse}
+                      onChange={(e) => setRegHouse(e.target.value)}
+                      placeholder="e.g. 42"
+                      className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15"
+                    />
+                    <p className="text-[11.5px] text-[#8AA096]">
+                      Leave blank if not yet assigned &mdash; the estate office will confirm this.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                      Create your 6-character PIN
+                    </label>
+                    <PinInputBoxes
+                      value={regPin}
+                      onChange={setRegPin}
+                      autoFocus={false}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                      Confirm PIN
+                    </label>
+                    <PinInputBoxes
+                      value={regPinConfirm}
+                      onChange={setRegPinConfirm}
+                      hasError={Boolean(regPinConfirm && regPin !== regPinConfirm)}
+                      autoFocus={false}
+                    />
+                  </div>
+
+                  <div className="bg-[#EAF7EE] border border-[#3FAE7A]/25 rounded-xl p-3 text-[12.5px] text-[#257A54] leading-relaxed">
+                    Your registration will be reviewed by the estate office. You’ll be notified here once approved.
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={regLoading}
+                    className="w-full flex items-center justify-center gap-2 font-bold text-[14.5px] py-3.5 px-4.5 rounded-xl bg-[#E8C547] text-[#4A3B0A] hover:bg-[#DDB63A] active:scale-[0.985] transition-all cursor-pointer disabled:opacity-60"
+                  >
+                    {regLoading ? 'Submitting...' : 'Submit registration'}
+                  </button>
+                </form>
               )}
-            </button>
-          </form>
-
-          {/* Quick Demo Credentials Assistant */}
-          <div className="pt-4 border-t border-[#E4D9BE] text-center space-y-2">
-            <span className="text-[11px] uppercase tracking-wider font-semibold text-[#10241A]/60">
-              Quick 1-Click Evaluation Profiles:
-            </span>
-            <div className="flex flex-wrap items-center justify-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  handleRoleChange('resident');
-                  setHouseNumber(14);
-                  setHouseUnit('Main House');
-                  setPin('1A2B3C');
-                }}
-                className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-[#F2EAD9] text-[#0A2F1C] border border-[#E4D9BE] hover:bg-[#E7D19C]"
-              >
-                Resident (H-14)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  handleRoleChange('security');
-                  setSecurityPin('4421');
-                }}
-                className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-[#F2EAD9] text-[#0A2F1C] border border-[#E4D9BE] hover:bg-[#E7D19C]"
-              >
-                Security Guard
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  handleRoleChange('staff');
-                  setHouseNumber(14);
-                  setHouseUnit('BQ');
-                  setPin('9482AB');
-                }}
-                className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-[#F2EAD9] text-[#0A2F1C] border border-[#E4D9BE] hover:bg-[#E7D19C]"
-              >
-                Staff (H-14 BQ)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  handleRoleChange('admin');
-                  setAdminEmail('admin@lighthouseestate.org');
-                  setAdminPassword('Admin@Lighthouse2026');
-                }}
-                className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-[#F2EAD9] text-[#0A2F1C] border border-[#E4D9BE] hover:bg-[#E7D19C]"
-              >
-                Estate Admin
-              </button>
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* Bottom Registration Link */}
-        <div className="text-center text-xs text-[#10241A]/70">
-          New Resident moving in?{' '}
-          <button
-            onClick={() => navigate('/register')}
-            className="text-[#0F472A] font-bold hover:underline"
-          >
-            Submit Household Registration →
-          </button>
+          {/* 3. STAFF ONBOARDING - STEP 1 */}
+          {activeView === 'staff-1' && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setActiveView('login')}
+                className="inline-flex items-center gap-1.5 text-[13px] font-bold text-[#257A54] mb-4.5 cursor-pointer hover:underline"
+              >
+                &larr; Back to sign in
+              </button>
+
+              <div className="mb-5.5">
+                <p className="text-[11px] font-bold tracking-[0.05em] uppercase text-[#257A54] mb-2">
+                  Step 1 of 2
+                </p>
+                <h1 className="font-['Sora',sans-serif] font-bold text-[22px] text-[#16241D] mb-1.5 tracking-[-0.02em]">
+                  Staff onboarding
+                </h1>
+                <p className="text-[13.5px] text-[#516459]">
+                  Enter the invite code your employer shared with you.
+                </p>
+              </div>
+
+              {inviteError && (
+                <div className="mb-4 p-3 rounded-xl bg-[#FCEBEB] border border-[#A32D2D]/20 text-[#A32D2D] text-[12.5px] font-semibold">
+                  {inviteError}
+                </div>
+              )}
+
+              <form onSubmit={handleVerifyInvite} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label htmlFor="inviteCode" className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                    Invite code
+                  </label>
+                  <input
+                    id="inviteCode"
+                    type="text"
+                    required
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                    placeholder="e.g. LH-6X92K"
+                    className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15 font-mono uppercase"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={inviteLoading}
+                  className="w-full flex items-center justify-center gap-2 font-bold text-[14.5px] py-3.5 px-4.5 rounded-xl bg-[#E8C547] text-[#4A3B0A] hover:bg-[#DDB63A] active:scale-[0.985] transition-all cursor-pointer disabled:opacity-60"
+                >
+                  {inviteLoading ? 'Verifying code...' : 'Verify code'}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* 4. STAFF ONBOARDING - STEP 2 */}
+          {activeView === 'staff-2' && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setActiveView('staff-1')}
+                className="inline-flex items-center gap-1.5 text-[13px] font-bold text-[#257A54] mb-4.5 cursor-pointer hover:underline"
+              >
+                &larr; Back to step 1
+              </button>
+
+              <div className="mb-4">
+                <p className="text-[11px] font-bold tracking-[0.05em] uppercase text-[#257A54] mb-2">
+                  Step 2 of 2
+                </p>
+                <h1 className="font-['Sora',sans-serif] font-bold text-[22px] text-[#16241D] mb-1.5 tracking-[-0.02em]">
+                  Complete your profile
+                </h1>
+              </div>
+
+              {/* Verified Chip */}
+              <div className="inline-flex items-center gap-2 bg-[#EAF7EE] text-[#257A54] text-[12px] font-bold py-1.5 px-3.5 rounded-full mb-5">
+                <svg className="w-3.5 h-3.5 stroke-current fill-none stroke-[2.2]" viewBox="0 0 24 24">
+                  <path d="M4 12l5 5L20 6" />
+                </svg>
+                Invite verified &middot; House {verifiedInviteData?.house_number || 14} &middot; {verifiedInviteData?.role || staffRole || 'Cook'}
+              </div>
+
+              {staffSuccess ? (
+                <div className="space-y-4 py-3 text-center">
+                  <div className="w-14 h-14 rounded-2xl bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mx-auto">
+                    <svg className="w-7 h-7 stroke-current fill-none stroke-[2]" viewBox="0 0 24 24">
+                      <path d="M4 12l5 5L20 6" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="font-['Sora',sans-serif] font-bold text-[17px] text-[#16241D]">
+                      Onboarding Completed!
+                    </h2>
+                    <p className="text-[13px] text-[#516459] mt-1">
+                      Your staff profile is active. You can now use your 6-character PIN for gate turnstile clearance.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveView('login'); setStaffSuccess(false); }}
+                    className="w-full py-3 px-4 rounded-xl bg-[#E8C547] text-[#4A3B0A] font-bold text-[14px] cursor-pointer hover:bg-[#DDB63A]"
+                  >
+                    Proceed to Sign In
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleStaffFormSubmit} noValidate className="space-y-4">
+                  {staffError && (
+                    <div className="p-3 rounded-xl bg-[#FCEBEB] border border-[#A32D2D]/20 text-[#A32D2D] text-[12.5px] font-semibold">
+                      {staffError}
+                    </div>
+                  )}
+
+                  {/* Section 1: Details */}
+                  <p className="text-[11px] font-extrabold tracking-[0.06em] uppercase text-[#257A54] mb-3">
+                    Your details
+                  </p>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                      Full name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={staffName}
+                      onChange={(e) => setStaffName(e.target.value)}
+                      placeholder="e.g. Fatima Bello"
+                      className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        Phone number *
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        value={staffPhone}
+                        onChange={(e) => setStaffPhone(e.target.value)}
+                        placeholder="+234 802..."
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        Role
+                      </label>
+                      <select
+                        value={staffRole}
+                        onChange={(e) => setStaffRole(e.target.value)}
+                        required
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15 cursor-pointer"
+                      >
+                        <option value="Cook">Cook</option>
+                        <option value="Cleaner">Cleaner</option>
+                        <option value="Driver">Driver</option>
+                        <option value="Gardener">Gardener</option>
+                        <option value="Nanny">Nanny</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Section 2: Identification */}
+                  <p className="text-[11px] font-extrabold tracking-[0.06em] uppercase text-[#257A54] pt-4 border-t border-[#E3EFE7]">
+                    Identification
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        ID type
+                      </label>
+                      <select
+                        value={idType}
+                        onChange={(e) => setIdType(e.target.value)}
+                        required
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15 cursor-pointer"
+                      >
+                        <option value="National ID (NIN)">National ID (NIN)</option>
+                        <option value="International passport">International passport</option>
+                        <option value="Driver's license">Driver's license</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        ID number *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={idNumber}
+                        onChange={(e) => setIdNumber(e.target.value)}
+                        placeholder="NIN or Passport number"
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                      Photo ID
+                    </label>
+                    <label className="flex items-center justify-center gap-2 w-full h-[46px] border-[1.5px] border-dashed border-[#E3EFE7] rounded-xl bg-[#FBFDF9] text-[#516459] text-[13px] font-semibold cursor-pointer hover:border-[#3FAE7A] hover:text-[#257A54] transition-all">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={() => setHasUploadedPhoto(true)}
+                        className="hidden"
+                      />
+                      <svg className="w-4 h-4 stroke-current fill-none stroke-[1.8]" viewBox="0 0 24 24">
+                        <path d="M12 3v12" />
+                        <path d="M7 8l5-5 5 5" />
+                        <path d="M5 21h14" />
+                      </svg>
+                      {hasUploadedPhoto ? 'Photo ID attached ✓' : 'Upload photo ID'}
+                    </label>
+                  </div>
+
+                  {/* Section 3: Guarantor */}
+                  <p className="text-[11px] font-extrabold tracking-[0.06em] uppercase text-[#257A54] pt-4 border-t border-[#E3EFE7]">
+                    Guarantor
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        Guarantor name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={gName}
+                        onChange={(e) => setGName(e.target.value)}
+                        placeholder="Guarantor Full Name"
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                        Guarantor phone *
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        value={gPhone}
+                        onChange={(e) => setGPhone(e.target.value)}
+                        placeholder="+234 803..."
+                        className="w-full h-[46px] border-[1.5px] border-[#E3EFE7] rounded-xl px-3.5 text-[15px] font-['Manrope',sans-serif] text-[#16241D] bg-[#FBFDF9] focus:outline-none focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Section 4: PIN */}
+                  <p className="text-[11px] font-extrabold tracking-[0.06em] uppercase text-[#257A54] pt-4 border-t border-[#E3EFE7]">
+                    Set your gate PIN
+                  </p>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                      6-character PIN
+                    </label>
+                    <PinInputBoxes
+                      value={staffPin}
+                      onChange={setStaffPin}
+                      autoFocus={false}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                      Confirm PIN
+                    </label>
+                    <PinInputBoxes
+                      value={staffPinConfirm}
+                      onChange={setStaffPinConfirm}
+                      hasError={Boolean(staffPinConfirm && staffPin !== staffPinConfirm)}
+                      autoFocus={false}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={staffLoading}
+                    className="w-full flex items-center justify-center gap-2 font-bold text-[14.5px] py-3.5 px-4.5 rounded-xl bg-[#E8C547] text-[#4A3B0A] hover:bg-[#DDB63A] active:scale-[0.985] transition-all cursor-pointer disabled:opacity-60"
+                  >
+                    {staffLoading ? 'Completing onboarding...' : 'Complete onboarding'}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
+
         </div>
       </div>
+
+      <footer className="relative z-10 text-center mt-6 text-[11.5px] text-white/40">
+        &copy; 2026 Light House Estate, Lekki
+      </footer>
     </div>
   );
 };

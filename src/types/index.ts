@@ -37,6 +37,13 @@ export interface AppUser {
   created_at: string;
   approved_by?: string;
   approved_at?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  emergency_relationship?: string;
+  vehicle_plates?: string[];
+  notify_gate_alerts?: boolean;
+  notify_notices?: boolean;
+  notify_sms?: boolean;
 }
 
 export type PassType = 
@@ -48,6 +55,8 @@ export type PassType =
   | 'one_time' 
   | 'recurring' 
   | 'contractor';
+
+export type EntryType = 'single' | 'multi';
 
 export type PassStatus = 
   | 'active' 
@@ -67,6 +76,11 @@ export interface VisitorPass {
   guest_phone?: string;
   guest_plate_number?: string;
   pass_type: PassType;
+  entry_type?: EntryType; // distinguishes 'single' (Guest, Delivery, Exit) from 'multi' (Long Stay, Group)
+  artisan_date?: string; // YYYY-MM-DD for Artisan/Contractor
+  start_time?: string; // HH:mm for Artisan/Contractor
+  end_time?: string; // HH:mm for Artisan/Contractor
+  valid_to?: string; // YYYY-MM-DD for Long Stay Visitor
   guest_count?: number;
   pass_code: string; // 6-digit numeric code
   qr_payload?: string;
@@ -74,11 +88,31 @@ export interface VisitorPass {
   valid_until: string; // alias/same as expires_at
   expires_at?: string;
   status: PassStatus;
+  overstayed?: boolean;
+  overstay_alerted?: boolean;
+  overstay_time?: string;
   created_at: string;
   verified_at?: string;
   verified_by?: string;
   checked_out_at?: string;
   notes?: string;
+}
+
+export interface EstateAlert {
+  id: string;
+  type: 'overstay_alert' | 'sos' | 'pass_scanned' | 'security';
+  title: string;
+  message: string;
+  target_role: 'admin' | 'resident' | 'all';
+  target_user_id?: string;
+  target_house_number?: number;
+  pass_id?: string;
+  pass_code?: string;
+  visitor_name?: string;
+  severity: 'warning' | 'critical' | 'info';
+  created_at: string;
+  read?: boolean;
+  resolved?: boolean;
 }
 
 export interface PassVerificationAttempt {
@@ -348,5 +382,52 @@ export interface MarketplaceListing {
   contact_method: string;
   status: 'active' | 'sold' | 'archived';
   created_at: string;
+}
+
+// Facility Booking Types
+export type FacilityCategory = 
+  | 'Culinary & Events' 
+  | 'Sports & Fitness' 
+  | 'Community & Faith' 
+  | 'Outdoor & Leisure';
+
+export interface Facility {
+  id: string;
+  name: string;
+  category: FacilityCategory;
+  description: string;
+  capacity: number;
+  location: string;
+  imageUrl: string;
+  operatingHours: string;
+  availableTimeSlots: string[];
+  features: string[];
+  rules: string[];
+  hourlyRate: string;
+  requiresApproval: boolean;
+}
+
+export type BookingStatus = 'confirmed' | 'pending' | 'cancelled' | 'completed';
+
+export interface FacilityBooking {
+  id: string;
+  facility_id: string;
+  facility_name: string;
+  resident_id: string;
+  resident_name: string;
+  resident_phone?: string;
+  house_number: number;
+  house_unit: HouseUnitType | string;
+  booking_date: string; // YYYY-MM-DD
+  time_slot: string; // e.g. "09:00 - 12:00"
+  start_time: string;
+  end_time: string;
+  event_title: string;
+  purpose: string;
+  guest_count: number;
+  status: BookingStatus;
+  special_requests?: string;
+  created_at: string;
+  admin_notes?: string;
 }
 

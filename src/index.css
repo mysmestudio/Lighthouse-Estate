@@ -107,3 +107,38 @@
   border-radius: 4px;
 }
 
+/* Landing Page Keyframe Animations */
+@keyframes sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes nudge {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(5px); }
+}
+
+@keyframes sosBreathe {
+  0%, 100% {
+    box-shadow: 0 10px 24px -8px rgba(194, 58, 56, 0.65);
+  }
+  50% {
+    box-shadow: 0 10px 30px -6px rgba(194, 58, 56, 0.9), 0 0 0 8px rgba(194, 58, 56, 0.12);
+  }
+}
+
+@keyframes sosPulseFast {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes scrollUp {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+

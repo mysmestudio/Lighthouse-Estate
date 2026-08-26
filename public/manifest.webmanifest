@@ -1,7 +1,7 @@
 {
-  "name": "Lighthouse Estate",
-  "short_name": "Lighthouse",
-  "description": "Lighthouse Estate access control, resident verification, visitor passes, and community facilities portal.",
+  "name": "Light House Estate, Lekki",
+  "short_name": "Light House Estate",
+  "description": "Light House Estate, Lekki access control, resident verification, visitor passes, and community facilities portal.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

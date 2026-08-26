@@ -20,6 +20,8 @@ import { StaffDirectoryPage } from './pages/StaffDirectoryPage';
 import { TownhallPollsPage } from './pages/TownhallPollsPage';
 import { FixItTicketsPage } from './pages/FixItTicketsPage';
 import { MarketplacePage } from './pages/MarketplacePage';
+import { FacilitiesPage } from './pages/FacilitiesPage';
+import { SettingsProfilePage } from './pages/SettingsProfilePage';
 import { PersistentSOSButton } from './components/sos/PersistentSOSButton';
 import { AppUser } from './types';
 import { getStoredCurrentUser, setStoredCurrentUser } from './lib/auth-helpers';
@@ -71,15 +73,20 @@ export default function App() {
         return <DashboardPage currentUser={currentUser} navigate={navigate} />;
       case '/passes':
         return <PassesPage currentUser={currentUser} navigate={navigate} />;
+      case '/facilities':
+        return <FacilitiesPage currentUser={currentUser} navigate={navigate} />;
       case '/gate':
         return <GatePage currentUser={currentUser} navigate={navigate} />;
       case '/notices':
         return <NoticesPage currentUser={currentUser} navigate={navigate} />;
       case '/community/polls':
+      case '/townhall-polls':
         return <TownhallPollsPage currentUser={currentUser} navigate={navigate} />;
       case '/community/tickets':
+      case '/fix-it-tickets':
         return <FixItTicketsPage currentUser={currentUser} navigate={navigate} />;
       case '/community/marketplace':
+      case '/marketplace':
         return <MarketplacePage currentUser={currentUser} navigate={navigate} />;
       case '/household':
         return <HouseholdHubPage currentUser={currentUser} navigate={navigate} />;
@@ -87,6 +94,19 @@ export default function App() {
         return <StaffOnboardingPage navigate={navigate} />;
       case '/directory':
         return <StaffDirectoryPage currentUser={currentUser} navigate={navigate} />;
+      case '/settings':
+      case '/profile':
+        return (
+          <SettingsProfilePage
+            currentUser={currentUser}
+            navigate={navigate}
+            onUserUpdated={(updatedUser) => {
+              setCurrentUser(updatedUser);
+              setStoredCurrentUser(updatedUser);
+            }}
+            onLogout={handleLogout}
+          />
+        );
       case '/admin':
         return <AdminPage currentUser={currentUser} navigate={navigate} />;
       case '/':
@@ -95,28 +115,35 @@ export default function App() {
     }
   };
 
+  const isLandingPage = currentPath === '/' || currentPath === '';
+  const isStandaloneMockupPage = true; // All pages now feature the unified Lighthouse Lekki design system with dedicated pillbar headers, lattice hero, floating dock, and 5s SOS button.
+
   return (
     <PwaProvider>
-      <div className="min-h-screen flex flex-col bg-[#FBF8F1] text-[#10241A]">
+      <div className={`min-h-screen flex flex-col ${isLandingPage || currentPath === '/login' || currentPath === '/register' || currentPath === '/staff-onboarding' ? 'bg-[#123528]' : 'bg-[#FBFDF9]'} text-[#16241D]`}>
         <OfflineBanner />
-        <Navbar
-          currentPath={currentPath}
-          navigate={navigate}
-          currentUser={currentUser}
-          onLogout={handleLogout}
-        />
-        <main className="flex-1">
+        {!isStandaloneMockupPage && (
+          <Navbar
+            currentPath={currentPath}
+            navigate={navigate}
+            currentUser={currentUser}
+            onLogout={handleLogout}
+          />
+        )}
+        <main className={isLandingPage ? 'h-screen overflow-hidden' : 'flex-1'}>
           {renderRoute()}
         </main>
-        <Footer />
+        {!isStandaloneMockupPage && <Footer />}
 
         {/* PWA Enhancements */}
         <InstallPromptBanner />
         <InstallModal />
         <UpdateToast />
 
-        {/* Persistent High-Contrast Emergency SOS Button (Always on screen for authenticated users) */}
-        <PersistentSOSButton currentUser={currentUser} navigate={navigate} />
+        {/* Persistent High-Contrast Emergency SOS Button (for subpages that don't have their own built-in SOS button) */}
+        {!isStandaloneMockupPage && (
+          <PersistentSOSButton currentUser={currentUser} navigate={navigate} />
+        )}
       </div>
     </PwaProvider>
   );

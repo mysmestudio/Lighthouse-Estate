@@ -152,9 +152,25 @@ export const GatePage: React.FC<GatePageProps> = ({ currentUser, navigate }) => 
 
   return (
     <div className="min-h-screen bg-[#10241A] text-white flex flex-col font-sans select-none pb-12">
-      {/* Top Header Bar for Outdoor Daylight Visibility */}
-      <div className="bg-[#0A2F1C] border-b border-[#C89B3C]/40 px-4 py-3 sm:px-6 flex items-center justify-between sticky top-0 z-30 shadow-md">
-        <div className="flex items-center gap-3">
+      {/* SVG Lattice Background Pattern Definition */}
+      <svg width="0" height="0" className="absolute">
+        <defs>
+          <pattern id="gate-lattice" width="56" height="56" patternUnits="userSpaceOnUse">
+            <g fill="none" stroke="currentColor" strokeWidth="1">
+              <rect x="10" y="10" width="36" height="36" transform="rotate(45 28 28)" />
+              <rect x="15" y="15" width="26" height="26" />
+            </g>
+          </pattern>
+        </defs>
+      </svg>
+
+      {/* Top Header Bar for Outdoor Daylight Visibility with Lattice Pattern */}
+      <div className="bg-gradient-to-br from-[#123528] to-[#0A2F1C] border-b border-[#C89B3C]/40 px-4 py-3 sm:px-6 flex items-center justify-between sticky top-0 z-30 shadow-md relative overflow-hidden">
+        <svg className="absolute inset-0 w-full h-full opacity-[0.12] pointer-events-none text-white">
+          <rect width="100%" height="100%" fill="url(#gate-lattice)" />
+        </svg>
+
+        <div className="flex items-center gap-3 relative z-10">
           <button
             onClick={() => navigate('/dashboard')}
             className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-[#E7D19C] transition-colors"
@@ -170,12 +186,12 @@ export const GatePage: React.FC<GatePageProps> = ({ currentUser, navigate }) => 
               </h1>
             </div>
             <p className="text-[11px] text-[#E7D19C]/90 font-medium">
-              Lighthouse Outer Command • {guardDisplayName}
+              Light House Outer Command • {guardDisplayName}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 relative z-10">
           <button
             onClick={() => navigate('/passes')}
             className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-bold text-[#E7D19C] border border-white/15"
@@ -390,7 +406,7 @@ export const GatePage: React.FC<GatePageProps> = ({ currentUser, navigate }) => 
           <div className="flex items-center justify-between border-b border-white/20 pb-4">
             <div className="flex items-center gap-3">
               <span className="text-xs sm:text-sm uppercase tracking-widest font-extrabold bg-white/20 px-3 py-1 rounded-full">
-                Lighthouse Security Clearance
+                Light House Security Clearance
               </span>
               <span className="font-mono text-sm opacity-80">
                 Code: {verificationResult.code}

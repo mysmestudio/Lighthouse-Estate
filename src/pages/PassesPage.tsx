@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Ticket,
   Plus,
   QrCode,
   Copy,
@@ -19,7 +18,12 @@ import {
   Sparkles,
   Phone,
   ArrowRight,
-  Check
+  Check,
+  X,
+  User,
+  Search,
+  RefreshCw,
+  Bell
 } from 'lucide-react';
 import { AppUser, VisitorPass, PassType, PassStatus } from '../types';
 import { getStoredPasses, saveStoredPasses } from '../lib/estate-data';
@@ -29,7 +33,7 @@ import {
   generatePassQRCode,
   buildWhatsAppShareMessage,
 } from '../lib/pass-service';
-import { StarMotifDivider } from '../components/common/StarMotifDivider';
+import { triggerSOSEvent } from '../lib/sos-service';
 
 interface PassesPageProps {
   currentUser: AppUser | null;
@@ -37,21 +41,28 @@ interface PassesPageProps {
 }
 
 const ITEMS_PER_PAGE = 20;
+const SOS_RING_LENGTH = 194.8;
+const SOS_HOLD_MS = 5000;
 
 export const PassesPage: React.FC<PassesPageProps> = ({ currentUser, navigate }) => {
   const [passes, setPasses] = useState<VisitorPass[]>(() => getStoredPasses());
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [prominentPass, setProminentPass] = useState<VisitorPass | null>(null);
+  const [qrModalPass, setQrModalPass] = useState<VisitorPass | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
-
-  // Pagination state
-  const [activePage, setActivePage] = useState(1);
-  const [historyPage, setHistoryPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Live clock state for real-time countdown recalculation every second
   const [currentTime, setCurrentTime] = useState<number>(Date.now());
+
+  // SOS state
+  const [isHoldingSOS, setIsHoldingSOS] = useState(false);
+  const [sosActivated, setSosActivated] = useState(false);
+  const [showSosToast, setShowSosToast] = useState(false);
+  const [sosProgressOffset, setSosProgressOffset] = useState(SOS_RING_LENGTH);
+  const [sosTransition, setSosTransition] = useState<string>('none');
+  const sosTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -65,24 +76,30 @@ export const PassesPage: React.FC<PassesPageProps> = ({ currentUser, navigate })
   const [guestName, setGuestName] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
   const [guestPlate, setGuestPlate] = useState('');
-  const [guestCount, setGuestCount] = useState<number>(2);
-  const [longStayDate, setLongStayDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 7);
-    return d.toISOString().split('T')[0];
-  });
+  const [guestCount, setGuestCount] = useState<number>(1);
   const [notes, setNotes] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [createdPassSuccess, setCreatedPassSuccess] = useState<VisitorPass | null>(null);
 
-  // Whenever a pass is selected for prominent display, generate its QR code
+  // Artisan/Contractor conditional states
+  const [artisanDate, setArtisanDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [artisanStartTime, setArtisanStartTime] = useState<string>('08:00');
+  const [artisanEndTime, setArtisanEndTime] = useState<string>('17:00');
+
+  // Long Stay Visitor conditional states
+  const [validFromDate, setValidFromDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [validToDate, setValidToDate] = useState<string>(() => new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]);
+
+  // Whenever a QR pass modal opens, generate its QR code
   useEffect(() => {
-    if (prominentPass) {
-      generatePassQRCode(prominentPass.id, prominentPass.pass_code).then((url) => {
+    if (qrModalPass) {
+      generatePassQRCode(qrModalPass.id, qrModalPass.pass_code).then((url) => {
         setQrDataUrl(url);
       });
     } else {
       setQrDataUrl(null);
     }
-  }, [prominentPass]);
+  }, [qrModalPass]);
 
   // Check and auto-expire passes
   useEffect(() => {
@@ -103,99 +120,110 @@ export const PassesPage: React.FC<PassesPageProps> = ({ currentUser, navigate })
     }
   }, [currentTime, passes]);
 
-  // Filter passes relevant to user
-  const userPasses = useMemo(() => {
-    return passes.filter((p) => {
-      if (currentUser?.role === 'resident') {
-        return (
-          p.resident_id === currentUser.id ||
-          (p.house_number === currentUser.house_number && p.house_unit === currentUser.house_unit)
-        );
-      }
-      return true;
-    });
-  }, [passes, currentUser]);
+  // Filter passes by search and resident house
+  const residentPasses = useMemo(() => {
+    let list = passes;
+    if (currentUser && currentUser.role === 'resident') {
+      list = list.filter(
+        (p) => p.house_number === currentUser.house_number && p.house_unit === currentUser.house_unit
+      );
+    }
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase();
+      list = list.filter(
+        (p) =>
+          p.guest_name.toLowerCase().includes(q) ||
+          p.pass_code.includes(q) ||
+          (p.guest_plate_number && p.guest_plate_number.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [passes, currentUser, searchTerm]);
 
-  // Split into Active and History
+  // Split into active vs history
   const activePasses = useMemo(() => {
-    return userPasses
-      .filter((p) => {
-        const exp = new Date(p.valid_until || p.expires_at || '').getTime();
-        return p.status === 'active' && exp > currentTime;
-      })
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [userPasses, currentTime]);
+    return residentPasses.filter((p) => p.status === 'active');
+  }, [residentPasses]);
 
   const historyPasses = useMemo(() => {
-    return userPasses
-      .filter((p) => {
-        const exp = new Date(p.valid_until || p.expires_at || '').getTime();
-        return p.status !== 'active' || exp <= currentTime;
-      })
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [userPasses, currentTime]);
+    return residentPasses.filter((p) => p.status !== 'active');
+  }, [residentPasses]);
 
-  // Pagination slicing
-  const paginatedActivePasses = useMemo(() => {
-    const start = (activePage - 1) * ITEMS_PER_PAGE;
-    return activePasses.slice(start, start + ITEMS_PER_PAGE);
-  }, [activePasses, activePage]);
+  // Metric stats
+  const activeCount = activePasses.length;
+  const historyCount = historyPasses.length;
+  const usedTodayCount = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    return passes.filter((p) => p.status === 'used' && p.created_at?.startsWith(today)).length;
+  }, [passes]);
 
-  const paginatedHistoryPasses = useMemo(() => {
-    const start = (historyPage - 1) * ITEMS_PER_PAGE;
-    return historyPasses.slice(start, start + ITEMS_PER_PAGE);
-  }, [historyPasses, historyPage]);
-
-  const totalActivePages = Math.ceil(activePasses.length / ITEMS_PER_PAGE) || 1;
-  const totalHistoryPages = Math.ceil(historyPasses.length / ITEMS_PER_PAGE) || 1;
-
-  // Handle Form Submit
-  const handleGeneratePass = async (e: React.FormEvent) => {
+  // Create Pass handler
+  const handleCreatePass = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!guestName.trim() || !currentUser) return;
+    if (!guestName.trim()) return;
 
-    // 1. Generate unique 6-digit numeric code
-    const existingActiveCodes = activePasses.map((p) => p.pass_code);
-    const unique6DigitCode = generateUnique6DigitCode(existingActiveCodes);
+    setIsCreating(true);
+    const code = generateUnique6DigitCode(passes.map((p) => p.pass_code));
+    
+    let validFrom = new Date().toISOString();
+    let validUntil = new Date(Date.now() + 18 * 3600000).toISOString();
+    let entryType: 'single' | 'multi' = 'single';
 
-    // 2. Compute expiry window
-    const { validFrom, validUntil } = calculatePassExpiry(passType, longStayDate);
+    if (passType === 'contractor') {
+      entryType = 'single';
+      validFrom = `${artisanDate}T${artisanStartTime}:00`;
+      validUntil = `${artisanDate}T${artisanEndTime}:00`;
+    } else if (passType === 'long_stay') {
+      entryType = 'multi';
+      validFrom = `${validFromDate}T00:00:00`;
+      validUntil = `${validToDate}T23:59:59`;
+    } else if (passType === 'guest') {
+      entryType = 'single';
+      validFrom = new Date().toISOString();
+      validUntil = new Date(Date.now() + 30 * 60000).toISOString();
+    } else if (passType === 'delivery') {
+      entryType = 'single';
+      validFrom = new Date().toISOString();
+      validUntil = new Date(Date.now() + 15 * 60000).toISOString();
+    }
 
     const newPass: VisitorPass = {
-      id: `pass-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      resident_id: currentUser.id,
-      resident_name: currentUser.full_name,
-      resident_phone: currentUser.phone,
-      house_number: currentUser.house_number,
-      house_unit: currentUser.house_unit,
+      id: `pass-${Date.now()}`,
+      house_number: currentUser?.house_number || 14,
+      house_unit: currentUser?.house_unit || 'Main House',
+      resident_name: currentUser?.full_name || 'Dr. Tariq Al-Mansoor',
+      resident_id: currentUser?.id || 'res-1',
       guest_name: guestName.trim(),
       guest_phone: guestPhone.trim() || undefined,
       guest_plate_number: guestPlate.trim().toUpperCase() || undefined,
       pass_type: passType,
-      guest_count: passType === 'group' ? Math.max(1, guestCount) : undefined,
-      pass_code: unique6DigitCode,
+      pass_code: code,
+      entry_type: entryType,
+      artisan_date: passType === 'contractor' ? artisanDate : undefined,
+      start_time: passType === 'contractor' ? artisanStartTime : undefined,
+      end_time: passType === 'contractor' ? artisanEndTime : undefined,
+      valid_to: passType === 'long_stay' ? validToDate : undefined,
       valid_from: validFrom,
       valid_until: validUntil,
       expires_at: validUntil,
       status: 'active',
-      created_at: new Date().toISOString(),
+      guest_count: passType === 'group' ? guestCount : undefined,
       notes: notes.trim() || undefined,
+      created_at: new Date().toISOString(),
     };
 
     const updated = [newPass, ...passes];
     setPasses(updated);
     saveStoredPasses(updated);
 
-    // Reset Form
+    setCreatedPassSuccess(newPass);
+    setIsCreating(false);
+
+    // Reset form
     setGuestName('');
     setGuestPhone('');
     setGuestPlate('');
-    setGuestCount(2);
     setNotes('');
-    setIsCreateModalOpen(false);
-
-    // Show prominently
-    setProminentPass(newPass);
   };
 
   // Revoke a pass
@@ -208,9 +236,6 @@ export const PassesPage: React.FC<PassesPageProps> = ({ currentUser, navigate })
     );
     setPasses(updated);
     saveStoredPasses(updated);
-    if (prominentPass?.id === passId) {
-      setProminentPass((prev) => (prev ? { ...prev, status: 'revoked' } : null));
-    }
   };
 
   // Copy to clipboard
@@ -268,768 +293,783 @@ export const PassesPage: React.FC<PassesPageProps> = ({ currentUser, navigate })
     };
   };
 
-  // Helper for pass badge styles
-  const getPassTypeBadge = (type: PassType, count?: number) => {
+  const getPassTypeLabel = (type: PassType) => {
     switch (type) {
       case 'guest':
       case 'one_time':
-        return { label: 'Guest (30m)', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+        return 'Guest (30m)';
       case 'delivery':
-        return { label: 'Delivery (15m)', color: 'bg-amber-100 text-amber-900 border-amber-200' };
+        return 'Delivery (15m)';
       case 'long_stay':
       case 'recurring':
-        return { label: 'Long-Stay', color: 'bg-indigo-100 text-indigo-900 border-indigo-200' };
+        return 'Long-Stay';
       case 'exit':
-        return { label: 'Exit Pass', color: 'bg-rose-100 text-rose-900 border-rose-200' };
+        return 'Exit Pass';
       case 'group':
-        return { label: `Group (${count || 2} pax)`, color: 'bg-purple-100 text-purple-900 border-purple-200' };
+        return 'Group Visit';
       default:
-        return { label: type, color: 'bg-[#F2EAD9] text-[#0A2F1C] border-[#E4D9BE]' };
+        return 'Pass';
     }
   };
 
-  const getStatusBadge = (status: PassStatus) => {
-    switch (status) {
-      case 'active':
-        return 'bg-emerald-100 text-emerald-800 border-emerald-300';
-      case 'used':
-        return 'bg-blue-100 text-blue-800 border-blue-300';
-      case 'out':
-        return 'bg-purple-100 text-purple-800 border-purple-300';
-      case 'expired':
-        return 'bg-gray-100 text-gray-700 border-gray-300';
-      case 'revoked':
-        return 'bg-red-100 text-red-800 border-red-300';
-      default:
-        return 'bg-gray-100 text-gray-700 border-gray-300';
-    }
+  // SOS Press & Hold Functions
+  const handleSOSStart = (e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
+    if (sosActivated) return;
+
+    setIsHoldingSOS(true);
+    setSosTransition(`stroke-dashoffset ${SOS_HOLD_MS / 1000}s linear`);
+    setSosProgressOffset(0);
+
+    sosTimerRef.current = setTimeout(async () => {
+      setSosActivated(true);
+      setIsHoldingSOS(false);
+      setShowSosToast(true);
+
+      if (currentUser) {
+        try {
+          await triggerSOSEvent(currentUser);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      setTimeout(() => {
+        setSosActivated(false);
+        setShowSosToast(false);
+        setSosTransition('none');
+        setSosProgressOffset(SOS_RING_LENGTH);
+      }, 4000);
+    }, SOS_HOLD_MS);
   };
+
+  const handleSOSCancel = () => {
+    if (sosActivated) return;
+    if (sosTimerRef.current) {
+      clearTimeout(sosTimerRef.current);
+      sosTimerRef.current = null;
+    }
+    setIsHoldingSOS(false);
+    setSosTransition('none');
+    setSosProgressOffset(SOS_RING_LENGTH);
+  };
+
+  const initials = currentUser?.full_name
+    ? currentUser.full_name
+        .split(' ')
+        .map((n) => n[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase()
+    : 'TA';
 
   return (
-    <div className="min-h-screen bg-[#FBF8F1] py-8 px-4 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Page Top Header */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-[#E4D9BE] pb-6">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="px-2.5 py-0.5 rounded-full bg-[#0F472A] text-[#E7D19C] text-[11px] font-bold uppercase tracking-wider">
-                Gate Pass Module
-              </span>
-              {currentUser && (
-                <span className="text-xs font-semibold text-[#10241A]/70">
-                  House {currentUser.house_number} • {currentUser.house_unit}
-                </span>
+    <div className="min-h-screen bg-[#FBFDF9] text-[#16241D] font-sans pb-32">
+      {/* SVG Pattern Definition */}
+      <svg width="0" height="0" className="absolute">
+        <defs>
+          <pattern id="lattice-passes" width="56" height="56" patternUnits="userSpaceOnUse">
+            <g fill="none" stroke="currentColor" strokeWidth="1">
+              <rect x="10" y="10" width="36" height="36" transform="rotate(45 28 28)" />
+              <rect x="15" y="15" width="26" height="26" />
+            </g>
+          </pattern>
+        </defs>
+      </svg>
+
+      {/* Top Header Pillbars */}
+      <header className="sticky top-0 z-40 flex justify-between items-center px-4 sm:px-6 py-4 bg-[#123528]/95 backdrop-blur-md border-b border-white/10">
+        <div className="flex items-center gap-2.5 bg-white/14 border border-white/16 backdrop-blur-md rounded-full px-3.5 py-1.5 shadow-xs">
+          <div className="w-7 h-7 rounded-[9px] bg-[#3FAE7A] flex items-center justify-center flex-shrink-0">
+            <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-[#0D2A1F]">
+              <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M12 7v10M7 12h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </div>
+          <span className="font-['Sora'] font-bold text-xs sm:text-sm text-white tracking-tight">
+            {currentUser?.role === 'resident'
+              ? `House ${currentUser.house_number} · ${currentUser.house_unit || 'Main House'}`
+              : 'Visitor Passes'}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 bg-white/14 border border-white/16 backdrop-blur-md rounded-full px-2.5 py-1 shadow-xs">
+          <button
+            onClick={() => navigate('/notices')}
+            className="relative w-8 h-8 rounded-full bg-white/14 border border-white/16 flex items-center justify-center text-white hover:bg-white/25 transition-colors cursor-pointer"
+            aria-label="Notifications"
+          >
+            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[#E8C547] border border-[#123528]" />
+            <Bell className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => navigate('/settings')}
+            className="w-8 h-8 rounded-full bg-[#E8C547] text-[#4A3B0A] flex items-center justify-center font-['Sora'] font-bold text-xs hover:opacity-90 transition-opacity cursor-pointer"
+            title="Account & Profile Settings"
+          >
+            {initials}
+          </button>
+        </div>
+      </header>
+
+      {/* Hero Header */}
+      <div className="bg-gradient-to-br from-[#123528] to-[#0D2A1F] text-white px-4 sm:px-6 pt-6 pb-12 relative overflow-hidden">
+        <svg className="absolute inset-0 w-full h-full opacity-[0.13] pointer-events-none text-white">
+          <rect width="100%" height="100%" fill="url(#lattice-passes)" />
+        </svg>
+        <div className="max-w-3xl mx-auto relative z-10">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="font-['Sora'] font-bold text-2xl sm:text-3xl tracking-tight text-white mb-1.5">
+                Visitor & Access Passes
+              </h1>
+              <p className="text-xs sm:text-sm text-white/75 leading-relaxed">
+                Generate encrypted 6-digit access codes and WhatsApp passes for verified entry at Main Gate 1 & 2.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => navigate('/gate')}
+                className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white font-semibold text-xs flex items-center gap-1.5 transition-all"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-[#E8C547]" />
+                <span>Gate Hub</span>
+              </button>
+              <button
+                onClick={() => {
+                  setCreatedPassSuccess(null);
+                  setIsCreateModalOpen(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-[#E8C547] hover:bg-[#DDB63A] text-[#4A3B0A] font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-98 transition-all"
+              >
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+                <span>New Pass</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Sheet Container */}
+      <div className="-mt-6 bg-[#FBFDF9] rounded-t-[26px] relative z-20 pt-6 px-4 sm:px-6">
+        <div className="max-w-3xl mx-auto space-y-6">
+
+          {/* Metric Grid */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 text-center shadow-xs">
+              <div className="font-['Sora'] font-extrabold text-xl text-[#257A54]">{activeCount}</div>
+              <div className="text-[10.5px] font-bold text-[#8AA096] uppercase tracking-wider mt-0.5">Active Passes</div>
+            </div>
+            <div className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 text-center shadow-xs">
+              <div className="font-['Sora'] font-extrabold text-xl text-[#16241D]">{passes.length}</div>
+              <div className="text-[10.5px] font-bold text-[#8AA096] uppercase tracking-wider mt-0.5">Total Issued</div>
+            </div>
+            <div className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 text-center shadow-xs">
+              <div className="font-['Sora'] font-extrabold text-xl text-[#B4922C]">{usedTodayCount}</div>
+              <div className="text-[10.5px] font-bold text-[#8AA096] uppercase tracking-wider mt-0.5">Logged In Today</div>
+            </div>
+          </div>
+
+          {/* Search & Tabs */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
+            {/* Tabs */}
+            <div className="flex items-center gap-1 bg-[#EAF7EE] p-1 rounded-xl border border-[#3FAE7A]/20">
+              <button
+                onClick={() => setActiveTab('active')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeTab === 'active'
+                    ? 'bg-white text-[#257A54] shadow-xs'
+                    : 'text-[#516459] hover:text-[#16241D]'
+                }`}
+              >
+                Active Passes ({activeCount})
+              </button>
+              <button
+                onClick={() => setActiveTab('history')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeTab === 'history'
+                    ? 'bg-white text-[#257A54] shadow-xs'
+                    : 'text-[#516459] hover:text-[#16241D]'
+                }`}
+              >
+                History ({historyCount})
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative flex-1 sm:max-w-xs">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8AA096]" />
+              <input
+                type="text"
+                placeholder="Search visitor, code or plate..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full h-9 pl-8 pr-3 bg-white border border-[#E3EFE7] rounded-xl text-xs text-[#16241D] placeholder-[#8AA096] focus:outline-none focus:border-[#3FAE7A] focus:ring-2 focus:ring-[#3FAE7A]/20"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8AA096] hover:text-[#16241D]"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               )}
             </div>
-            <h1 className="fraunces text-3xl sm:text-4xl font-bold text-[#0A2F1C]">
-              Access & Visitor Passes
-            </h1>
-            <p className="text-xs sm:text-sm text-[#10241A]/70 mt-1 max-w-2xl">
-              Create and manage encrypted 6-digit numeric access codes and QR passes for guests, deliveries, contractors, and group visits.
-            </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate('/gate')}
-              className="px-4 py-2.5 rounded-xl border border-[#0F472A] text-[#0F472A] hover:bg-[#F2EAD9] font-bold text-xs flex items-center gap-2 transition-colors shadow-2xs"
-            >
-              <ShieldCheck className="w-4 h-4 text-[#C89B3C]" />
-              <span>Gate Hub Scanner</span>
-            </button>
-            <button
-              onClick={() => {
-                if (!currentUser) {
-                  navigate('/login');
-                } else {
-                  setIsCreateModalOpen(true);
-                }
-              }}
-              className="px-5 py-2.5 rounded-xl bg-[#0F472A] text-white hover:bg-[#0A2F1C] font-bold text-xs shadow-soft hover:shadow-soft-lg flex items-center gap-2 transition-all"
-            >
-              <Plus className="w-4 h-4 text-[#E7D19C]" />
-              <span>+ New Pass</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Tab Switcher */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E4D9BE] pb-3">
-          <div className="flex items-center gap-2 bg-[#F2EAD9] p-1 rounded-xl border border-[#E4D9BE]">
-            <button
-              onClick={() => setActiveTab('active')}
-              className={`px-5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                activeTab === 'active'
-                  ? 'bg-[#0F472A] text-white shadow-xs'
-                  : 'text-[#10241A]/70 hover:text-[#10241A]'
-              }`}
-            >
-              <span>Active Passes</span>
-              <span
-                className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
-                  activeTab === 'active' ? 'bg-[#C89B3C] text-white' : 'bg-white/70 text-[#0F472A]'
-                }`}
-              >
-                {activePasses.length}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('history')}
-              className={`px-5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                activeTab === 'history'
-                  ? 'bg-[#0F472A] text-white shadow-xs'
-                  : 'text-[#10241A]/70 hover:text-[#10241A]'
-              }`}
-            >
-              <span>Pass History</span>
-              <span
-                className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
-                  activeTab === 'history' ? 'bg-[#C89B3C] text-white' : 'bg-white/70 text-[#0F472A]'
-                }`}
-              >
-                {historyPasses.length}
-              </span>
-            </button>
-          </div>
-
-          <div className="text-xs text-[#10241A]/60 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Live Gate System Synchronized (20 per page)</span>
-          </div>
-        </div>
-
-        {/* TAB 1: ACTIVE PASSES */}
-        {activeTab === 'active' && (
-          <div className="space-y-6">
-            {paginatedActivePasses.length === 0 ? (
-              <div className="card-estate p-12 text-center bg-white border-[#E4D9BE] shadow-soft space-y-4">
-                <div className="w-16 h-16 rounded-full bg-[#F2EAD9] text-[#C89B3C] flex items-center justify-center mx-auto">
-                  <Ticket className="w-8 h-8" />
-                </div>
-                <div>
-                  <h3 className="fraunces text-xl font-bold text-[#0A2F1C]">
-                    No Active Visitor Passes
-                  </h3>
-                  <p className="text-xs text-[#10241A]/70 max-w-md mx-auto mt-1">
-                    You currently have no unexpired guest or delivery tokens. Click below to issue a 6-digit access code.
+          {/* Passes List Section */}
+          {activeTab === 'active' ? (
+            <div className="space-y-4">
+              {activePasses.length === 0 ? (
+                <div className="bg-white border border-[#E3EFE7] rounded-2xl p-10 text-center space-y-3 shadow-xs">
+                  <div className="w-12 h-12 rounded-2xl bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <h3 className="font-['Sora'] font-bold text-base text-[#16241D]">No active passes</h3>
+                  <p className="text-xs text-[#516459] max-w-sm mx-auto">
+                    You do not have any pending or active visitor codes. Issue a pass before your guests arrive at the gate.
                   </p>
+                  <button
+                    onClick={() => {
+                      setCreatedPassSuccess(null);
+                      setIsCreateModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#E8C547] text-[#4A3B0A] font-bold text-xs hover:bg-[#DDB63A] transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Create Pass Now</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => setIsCreateModalOpen(true)}
-                  className="px-6 py-2.5 rounded-xl bg-[#0F472A] text-white text-xs font-bold hover:bg-[#0A2F1C] shadow-xs"
-                >
-                  Generate First Pass
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {paginatedActivePasses.map((pass) => {
-                  const badgeInfo = getPassTypeBadge(pass.pass_type, pass.guest_count);
+              ) : (
+                activePasses.map((pass) => {
                   const countdown = formatCountdown(pass.valid_until || pass.expires_at || '');
-
                   return (
                     <div
                       key={pass.id}
-                      className="bg-white rounded-[14px] border border-[#E4D9BE] hover:border-[#C89B3C] p-6 shadow-soft transition-all space-y-4 flex flex-col justify-between"
+                      className="bg-white border border-[#E3EFE7] rounded-2xl p-4 sm:p-5 shadow-xs transition-all hover:border-[#3FAE7A]/40"
                     >
-                      <div className="space-y-3">
-                        {/* Header Badge Row */}
-                        <div className="flex items-center justify-between gap-2">
-                          <span
-                            className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md border ${badgeInfo.color}`}
-                          >
-                            {badgeInfo.label}
+                      {/* Top Meta Row */}
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-['Sora'] font-extrabold text-[10.5px] uppercase tracking-wider px-2.5 py-1 rounded-md bg-[#FBF3D9] text-[#B4922C]">
+                            {getPassTypeLabel(pass.pass_type)}
                           </span>
-
-                          <div
-                            className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border ${
-                              countdown.isUrgent
-                                ? 'bg-amber-50 text-amber-800 border-amber-300 animate-pulse'
-                                : 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                            }`}
-                          >
-                            <Clock className="w-3.5 h-3.5" />
-                            <span className="font-mono tabular-nums">{countdown.label}</span>
-                          </div>
-                        </div>
-
-                        {/* Guest Details */}
-                        <div>
-                          <h3 className="fraunces text-xl font-bold text-[#0A2F1C]">
-                            {pass.guest_name}
-                          </h3>
-                          <div className="text-xs text-[#10241A]/70 flex flex-wrap items-center gap-2 mt-1">
-                            {pass.guest_phone && (
-                              <span className="flex items-center gap-1">
-                                <Phone className="w-3 h-3 text-[#C89B3C]" />
-                                {pass.guest_phone}
-                              </span>
-                            )}
-                            {pass.guest_plate_number && (
-                              <span className="flex items-center gap-1 font-mono font-bold text-[#0F472A] bg-[#F2EAD9] px-2 py-0.5 rounded">
-                                <Car className="w-3 h-3" />
-                                {pass.guest_plate_number}
-                              </span>
-                            )}
-                          </div>
-                          {pass.notes && (
-                            <p className="text-[11px] text-[#10241A]/60 italic mt-1.5">
-                              "{pass.notes}"
-                            </p>
+                          {pass.guest_plate_number && (
+                            <span className="flex items-center gap-1 text-[11px] font-bold text-[#516459] bg-[#FBFDF9] border border-[#E3EFE7] px-2 py-0.5 rounded-md">
+                              <Car className="w-3 h-3 text-[#8AA096]" />
+                              {pass.guest_plate_number}
+                            </span>
                           )}
                         </div>
 
-                        {/* Large 6-Digit Numeric Token Box */}
-                        <div className="p-4 rounded-xl bg-[#FBF8F1] border border-[#E4D9BE] flex items-center justify-between">
-                          <div>
-                            <span className="text-[10px] text-[#10241A]/60 block uppercase font-bold tracking-wider">
-                              6-Digit Access Code
-                            </span>
-                            <span className="font-mono text-2xl sm:text-3xl font-extrabold tracking-widest tabular-nums text-[#0F472A]">
-                              {pass.pass_code}
-                            </span>
-                          </div>
+                        {/* Countdown Badge */}
+                        <span
+                          className={`flex items-center gap-1 text-[11px] font-mono font-bold px-2.5 py-1 rounded-full ${
+                            countdown.isUrgent
+                              ? 'bg-[#FCEBEB] text-[#A32D2D]'
+                              : 'bg-[#EAF7EE] text-[#257A54]'
+                          }`}
+                        >
+                          <Clock className="w-3 h-3" />
+                          {countdown.label}
+                        </span>
+                      </div>
 
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => setProminentPass(pass)}
-                              className="p-2.5 rounded-xl bg-white border border-[#E4D9BE] hover:border-[#0F472A] text-[#0A2F1C] hover:bg-[#F2EAD9] transition-all shadow-2xs"
-                              title="Show Large QR Code"
-                            >
-                              <QrCode className="w-5 h-5 text-[#0F472A]" />
-                            </button>
-                            <button
-                              onClick={() => handleCopyToClipboard(pass)}
-                              className="p-2.5 rounded-xl bg-white border border-[#E4D9BE] hover:border-[#0F472A] text-[#0A2F1C] hover:bg-[#F2EAD9] transition-all shadow-2xs"
-                              title="Copy Full Pass Details"
-                            >
-                              {copyFeedback === pass.pass_code ? (
-                                <Check className="w-5 h-5 text-emerald-600" />
-                              ) : (
-                                <Copy className="w-5 h-5 text-[#0F472A]" />
-                              )}
-                            </button>
+                      {/* Visitor Name & Info */}
+                      <div className="mb-4">
+                        <h3 className="font-['Sora'] font-bold text-lg text-[#16241D]">
+                          {pass.guest_name}
+                        </h3>
+                        {pass.guest_phone && (
+                          <div className="flex items-center gap-1 text-xs text-[#8AA096] mt-0.5">
+                            <Phone className="w-3 h-3" />
+                            {pass.guest_phone}
                           </div>
-                        </div>
-
-                        {copyFeedback === pass.pass_code && (
-                          <p className="text-[11px] text-emerald-700 font-bold text-center">
-                            ✓ Copied WhatsApp message template!
+                        )}
+                        {pass.notes && (
+                          <p className="text-xs text-[#516459] mt-1 italic bg-[#FBFDF9] p-2 rounded-lg border border-[#E3EFE7]">
+                            "{pass.notes}"
                           </p>
                         )}
                       </div>
 
-                      {/* Bottom Action Footer */}
-                      <div className="pt-3 border-t border-[#E4D9BE]/60 flex items-center justify-between gap-2">
+                      {/* 6-Digit Code Box */}
+                      <div className="bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl p-3.5 flex items-center justify-between gap-3 mb-4">
+                        <div>
+                          <div className="text-[10px] font-bold text-[#8AA096] uppercase tracking-wider mb-0.5">
+                            6-Digit Access Code
+                          </div>
+                          <div className="font-['Sora'] font-extrabold text-2xl sm:text-3xl text-[#257A54] tracking-widest font-mono">
+                            {pass.pass_code}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setQrModalPass(pass)}
+                            className="w-10 h-10 rounded-xl bg-white border border-[#E3EFE7] hover:border-[#3FAE7A] hover:bg-[#EAF7EE] text-[#257A54] flex items-center justify-center transition-colors shadow-2xs"
+                            title="View Gate QR Code"
+                          >
+                            <QrCode className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={() => handleCopyToClipboard(pass)}
+                            className="w-10 h-10 rounded-xl bg-white border border-[#E3EFE7] hover:border-[#3FAE7A] hover:bg-[#EAF7EE] text-[#257A54] flex items-center justify-center transition-colors shadow-2xs"
+                            title="Copy Access Details"
+                          >
+                            {copyFeedback === pass.pass_code ? (
+                              <Check className="w-5 h-5 text-[#257A54]" />
+                            ) : (
+                              <Copy className="w-5 h-5" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Action Row */}
+                      <div className="flex items-center justify-between pt-1 text-xs">
                         <button
                           onClick={() => handleShareWhatsApp(pass)}
-                          className="text-xs font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#EAF7EE] text-[#257A54] font-bold hover:bg-[#d8f2df] transition-colors"
                         >
-                          <Share2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <Share2 className="w-3.5 h-3.5" />
                           <span>Share WhatsApp</span>
                         </button>
 
                         <button
                           onClick={() => handleRevokePass(pass.id)}
-                          className="text-xs font-bold text-red-600 hover:text-red-800 hover:underline"
+                          className="font-bold text-[#A32D2D] hover:underline px-2 py-1"
                         >
                           Revoke Pass
                         </button>
                       </div>
                     </div>
                   );
-                })}
-              </div>
-            )}
-
-            {/* Pagination Controls for Active */}
-            {totalActivePages > 1 && (
-              <div className="flex items-center justify-between border-t border-[#E4D9BE] pt-4">
-                <span className="text-xs text-[#10241A]/70">
-                  Showing {(activePage - 1) * ITEMS_PER_PAGE + 1}–
-                  {Math.min(activePage * ITEMS_PER_PAGE, activePasses.length)} of {activePasses.length} active passes
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    disabled={activePage === 1}
-                    onClick={() => setActivePage((p) => p - 1)}
-                    className="p-2 rounded-lg border border-[#E4D9BE] bg-white disabled:opacity-40 hover:bg-[#F2EAD9]"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="text-xs font-bold text-[#0A2F1C]">
-                    Page {activePage} of {totalActivePages}
-                  </span>
-                  <button
-                    disabled={activePage === totalActivePages}
-                    onClick={() => setActivePage((p) => p + 1)}
-                    className="p-2 rounded-lg border border-[#E4D9BE] bg-white disabled:opacity-40 hover:bg-[#F2EAD9]"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+                })
+              )}
+            </div>
+          ) : (
+            /* History Tab */
+            <div className="space-y-3">
+              {historyPasses.length === 0 ? (
+                <div className="bg-white border border-[#E3EFE7] rounded-2xl p-10 text-center text-[#8AA096] text-xs shadow-xs">
+                  No historical visitor passes found.
                 </div>
-              </div>
-            )}
+              ) : (
+                historyPasses.map((pass) => (
+                  <div
+                    key={pass.id}
+                    className="bg-white border border-[#E3EFE7] rounded-xl p-3.5 flex items-center justify-between gap-3 text-xs shadow-xs opacity-85"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-['Sora'] font-bold text-sm text-[#16241D]">
+                          {pass.guest_name}
+                        </span>
+                        <span className="font-mono font-bold text-xs text-[#8AA096]">
+                          {pass.pass_code}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[#8AA096] mt-0.5">
+                        {getPassTypeLabel(pass.pass_type)} &middot; {new Date(pass.created_at || '').toLocaleDateString()}
+                      </div>
+                    </div>
+
+                    <span
+                      className={`px-2.5 py-1 rounded-full text-[10.5px] font-bold uppercase tracking-wider ${
+                        pass.status === 'used'
+                          ? 'bg-[#EAF7EE] text-[#257A54]'
+                          : pass.status === 'revoked'
+                          ? 'bg-[#FCEBEB] text-[#A32D2D]'
+                          : 'bg-[#FBF3D9] text-[#B4922C]'
+                      }`}
+                    >
+                      {pass.status}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+        </div>
+      </div>
+
+      {/* Floating Bottom Dock */}
+      <nav className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex gap-1 bg-[#0D2A1F]/92 backdrop-blur-md border border-white/10 p-2 rounded-full shadow-2xl">
+        <button
+          onClick={() => navigate('/dashboard')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 11l8-7 8 7" />
+            <path d="M6 10v9a1 1 0 001 1h10a1 1 0 001-1v-9" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Home</span>
+        </button>
+        <button
+          onClick={() => navigate('/passes')}
+          className="w-12 h-11 border-none bg-white/12 text-[#E8C547] rounded-full flex flex-col items-center justify-center gap-0.5 cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 9a3 3 0 013-3h14a3 3 0 013 3v10a3 3 0 01-3 3H5a3 3 0 01-3-3V9z" />
+            <path d="M9 14h6" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Passes</span>
+        </button>
+        <button
+          onClick={() => navigate('/facilities')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 21h18M3 7v14M21 7v14M6 3h12v4H6z" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Facilities</span>
+        </button>
+        <button
+          onClick={() => navigate('/household')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="9" cy="8" r="3" />
+            <path d="M4 20c0-3 2.5-5 5-5s5 2 5 5" />
+            <circle cx="17" cy="9" r="2.3" />
+            <path d="M15 20c0-2.4 1-4 3.5-4.3" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Staff</span>
+        </button>
+        <button
+          onClick={() => navigate('/notices')}
+          className="w-12 h-11 border-none bg-transparent rounded-full flex flex-col items-center justify-center gap-0.5 text-white/55 hover:text-white transition-colors cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 8a6 6 0 1112 0c0 4 1.5 6 2 6H4c0.5 0 2-2 2-6z" />
+            <path d="M10 20a2 2 0 004 0" />
+          </svg>
+          <span className="text-[8.5px] font-bold">Notices</span>
+        </button>
+      </nav>
+
+      {/* Floating Emergency SOS Button */}
+      <div className="fixed right-4 bottom-5 w-[70px] h-[70px] z-50">
+        <svg className="absolute inset-0 w-[70px] h-[70px] -rotate-90 pointer-events-none" viewBox="0 0 70 70">
+          <circle cx="35" cy="35" r="31" stroke="rgba(18,53,40,0.12)" strokeWidth="4" fill="none" />
+          <circle
+            cx="35"
+            cy="35"
+            r="31"
+            stroke="#C23A38"
+            strokeWidth="4"
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={SOS_RING_LENGTH}
+            strokeDashoffset={sosProgressOffset}
+            style={{ transition: sosTransition }}
+          />
+        </svg>
+
+        <button
+          onMouseDown={handleSOSStart}
+          onMouseUp={handleSOSCancel}
+          onMouseLeave={handleSOSCancel}
+          onTouchStart={handleSOSStart}
+          onTouchEnd={handleSOSCancel}
+          onTouchCancel={handleSOSCancel}
+          className={`absolute top-[7px] left-[7px] w-14 h-14 rounded-full border-none bg-gradient-to-br from-[#F0645F] to-[#C23A38] flex flex-col items-center justify-center gap-0.5 cursor-pointer shadow-lg select-none touch-none ${
+            isHoldingSOS ? 'scale-95' : 'animate-pulse'
+          } ${sosActivated ? 'bg-gradient-to-br from-[#FF6E68] to-[#D2413F] scale-105' : ''}`}
+          aria-label="Hold for 5 seconds for SOS"
+        >
+          <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3l9 16H3L12 3z" />
+            <line x1="12" y1="9" x2="12" y2="14" />
+            <circle cx="12" cy="17" r="0.6" fill="white" stroke="none" />
+          </svg>
+          <span className="font-['Sora'] font-extrabold text-[8.5px] tracking-wider text-white">SOS</span>
+        </button>
+
+        {showSosToast && (
+          <div className="absolute bottom-20 right-0 bg-[#0D2A1F] border border-white/20 text-white text-xs font-semibold px-3 py-2 rounded-xl whitespace-nowrap shadow-xl">
+            Alert sent to gate security
           </div>
         )}
+      </div>
 
-        {/* TAB 2: PASS HISTORY */}
-        {activeTab === 'history' && (
-          <div className="space-y-6">
-            {paginatedHistoryPasses.length === 0 ? (
-              <div className="card-estate p-12 text-center bg-white border-[#E4D9BE] shadow-soft space-y-3">
-                <Ticket className="w-12 h-12 text-[#C89B3C] mx-auto opacity-50" />
-                <h3 className="fraunces text-xl font-bold text-[#0A2F1C]">
-                  No Pass History Yet
-                </h3>
-                <p className="text-xs text-[#10241A]/70 max-w-sm mx-auto">
-                  Past, used, and expired visitor passes will appear here in chronological order.
-                </p>
+      {/* CREATE PASS MODAL */}
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => setIsCreateModalOpen(false)}
+              className="absolute top-5 right-5 w-8 h-8 rounded-full bg-[#FBFDF9] border border-[#E3EFE7] flex items-center justify-center text-[#516459] hover:text-[#16241D]"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="mb-5">
+              <span className="font-['Sora'] font-bold text-[10.5px] uppercase tracking-wider text-[#257A54]">
+                Gate Access
+              </span>
+              <h2 className="font-['Sora'] font-bold text-xl text-[#16241D] mt-0.5">
+                Issue Visitor Pass
+              </h2>
+              <p className="text-xs text-[#516459]">
+                Generate an immediate 6-digit access code for your guest or delivery.
+              </p>
+            </div>
+
+            {createdPassSuccess ? (
+              <div className="space-y-4">
+                <div className="bg-[#EAF7EE] border border-[#3FAE7A]/30 rounded-2xl p-5 text-center">
+                  <div className="w-10 h-10 rounded-full bg-[#3FAE7A] text-white flex items-center justify-center mx-auto mb-2">
+                    <Check className="w-5 h-5 stroke-[2.5]" />
+                  </div>
+                  <h3 className="font-['Sora'] font-bold text-base text-[#16241D]">Pass Generated</h3>
+                  <p className="text-xs text-[#257A54] mt-0.5">Valid for {createdPassSuccess.guest_name}</p>
+
+                  <div className="font-['Sora'] font-extrabold text-3xl text-[#257A54] tracking-widest my-3 font-mono">
+                    {createdPassSuccess.pass_code}
+                  </div>
+
+                  <div className="flex gap-2 justify-center">
+                    <button
+                      onClick={() => handleCopyToClipboard(createdPassSuccess)}
+                      className="px-3 py-1.5 rounded-xl bg-white border border-[#E3EFE7] text-xs font-bold text-[#16241D] flex items-center gap-1.5 shadow-2xs"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>{copyFeedback === createdPassSuccess.pass_code ? 'Copied!' : 'Copy'}</span>
+                    </button>
+                    <button
+                      onClick={() => handleShareWhatsApp(createdPassSuccess)}
+                      className="px-3 py-1.5 rounded-xl bg-[#257A54] text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                      <span>WhatsApp</span>
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setCreatedPassSuccess(null);
+                    setIsCreateModalOpen(false);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-[#E8C547] text-[#4A3B0A] font-bold text-xs hover:bg-[#DDB63A]"
+                >
+                  Done
+                </button>
               </div>
             ) : (
-              <div className="bg-white rounded-[14px] border border-[#E4D9BE] shadow-soft overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-[#F2EAD9] border-b border-[#E4D9BE] text-[#0A2F1C] text-xs font-bold uppercase tracking-wider">
-                      <tr>
-                        <th className="py-3.5 px-4">Visitor & Vehicle</th>
-                        <th className="py-3.5 px-4">Pass Type</th>
-                        <th className="py-3.5 px-4">Code</th>
-                        <th className="py-3.5 px-4">Status</th>
-                        <th className="py-3.5 px-4">Issued At</th>
-                        <th className="py-3.5 px-4">Expiry / Used Time</th>
-                        <th className="py-3.5 px-4 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#E4D9BE]/60 text-xs">
-                      {paginatedHistoryPasses.map((pass) => {
-                        const badge = getPassTypeBadge(pass.pass_type, pass.guest_count);
-                        const statusClass = getStatusBadge(pass.status);
-
-                        return (
-                          <tr key={pass.id} className="hover:bg-[#FBF8F1]/80 transition-colors">
-                            <td className="py-3.5 px-4">
-                              <div className="font-bold text-[#0A2F1C] text-sm">
-                                {pass.guest_name}
-                              </div>
-                              <div className="text-[11px] text-[#10241A]/60 flex items-center gap-1.5 mt-0.5">
-                                {pass.guest_phone && <span>{pass.guest_phone}</span>}
-                                {pass.guest_plate_number && (
-                                  <span className="font-mono font-bold text-[#0F472A]">
-                                    • {pass.guest_plate_number}
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-
-                            <td className="py-3.5 px-4">
-                              <span
-                                className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border ${badge.color}`}
-                              >
-                                {badge.label}
-                              </span>
-                            </td>
-
-                            <td className="py-3.5 px-4 font-mono font-bold text-sm tracking-wider text-[#0F472A]">
-                              {pass.pass_code}
-                            </td>
-
-                            <td className="py-3.5 px-4">
-                              <span
-                                className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${statusClass}`}
-                              >
-                                {pass.status.toUpperCase()}
-                              </span>
-                            </td>
-
-                            <td className="py-3.5 px-4 text-[#10241A]/70">
-                              {new Date(pass.created_at).toLocaleDateString([], {
-                                month: 'short',
-                                day: 'numeric',
-                              })}{' '}
-                              {new Date(pass.created_at).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </td>
-
-                            <td className="py-3.5 px-4 text-[#10241A]/70">
-                              {pass.verified_at ? (
-                                <span className="text-blue-800 font-semibold">
-                                  Verified:{' '}
-                                  {new Date(pass.verified_at).toLocaleTimeString([], {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
-                                </span>
-                              ) : pass.checked_out_at ? (
-                                <span className="text-purple-800 font-semibold">
-                                  Out:{' '}
-                                  {new Date(pass.checked_out_at).toLocaleTimeString([], {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
-                                </span>
-                              ) : (
-                                <span>
-                                  Exp:{' '}
-                                  {new Date(pass.valid_until || pass.expires_at || '').toLocaleTimeString(
-                                    [],
-                                    { hour: '2-digit', minute: '2-digit' }
-                                  )}
-                                </span>
-                              )}
-                            </td>
-
-                            <td className="py-3.5 px-4 text-right">
-                              <button
-                                onClick={() => setProminentPass(pass)}
-                                className="px-3 py-1 rounded-lg border border-[#E4D9BE] bg-white hover:bg-[#F2EAD9] font-bold text-[#0F472A] transition-colors inline-flex items-center gap-1"
-                              >
-                                <QrCode className="w-3.5 h-3.5 text-[#C89B3C]" />
-                                <span>View QR</span>
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* Pagination Controls for History */}
-            {totalHistoryPages > 1 && (
-              <div className="flex items-center justify-between border-t border-[#E4D9BE] pt-4">
-                <span className="text-xs text-[#10241A]/70">
-                  Showing {(historyPage - 1) * ITEMS_PER_PAGE + 1}–
-                  {Math.min(historyPage * ITEMS_PER_PAGE, historyPasses.length)} of {historyPasses.length} total passes
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    disabled={historyPage === 1}
-                    onClick={() => setHistoryPage((p) => p - 1)}
-                    className="p-2 rounded-lg border border-[#E4D9BE] bg-white disabled:opacity-40 hover:bg-[#F2EAD9]"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="text-xs font-bold text-[#0A2F1C]">
-                    Page {historyPage} of {totalHistoryPages}
-                  </span>
-                  <button
-                    disabled={historyPage === totalHistoryPages}
-                    onClick={() => setHistoryPage((p) => p + 1)}
-                    className="p-2 rounded-lg border border-[#E4D9BE] bg-white disabled:opacity-40 hover:bg-[#F2EAD9]"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* PROMINENT PASS DISPLAY MODAL (Large Code, Scannable QR, Countdown, Share Buttons) */}
-        {prominentPass && (
-          <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-white rounded-[16px] w-full max-w-md p-6 sm:p-7 space-y-6 shadow-2xl border border-[#E4D9BE] relative max-h-[92vh] overflow-y-auto">
-              {/* Modal Top Header */}
-              <div className="flex items-center justify-between border-b border-[#E4D9BE] pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#C89B3C]"></span>
-                  <h3 className="fraunces text-lg font-bold text-[#0A2F1C]">
-                    Gate Access Clearance Pass
-                  </h3>
-                </div>
-                <button
-                  onClick={() => setProminentPass(null)}
-                  className="w-8 h-8 rounded-full bg-[#F2EAD9] text-[#10241A] hover:bg-[#E4D9BE] flex items-center justify-center text-sm font-bold"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* Guest & House Info */}
-              <div className="text-center space-y-1">
-                <span
-                  className={`inline-block text-[11px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border mb-1 ${
-                    getPassTypeBadge(prominentPass.pass_type, prominentPass.guest_count).color
-                  }`}
-                >
-                  {getPassTypeBadge(prominentPass.pass_type, prominentPass.guest_count).label}
-                </span>
-                <h2 className="fraunces text-2xl font-bold text-[#0A2F1C]">
-                  {prominentPass.guest_name}
-                </h2>
-                <p className="text-xs text-[#10241A]/70 font-medium">
-                  Destination: House {prominentPass.house_number} ({prominentPass.house_unit}) • Host: {prominentPass.resident_name}
-                </p>
-                {prominentPass.guest_plate_number && (
-                  <p className="text-xs font-mono font-bold text-[#0F472A]">
-                    Vehicle Plate: {prominentPass.guest_plate_number}
-                  </p>
-                )}
-              </div>
-
-              {/* 6-Digit Numeric Code Display (Prominent & Tabular) */}
-              <div className="bg-[#0F472A] rounded-2xl p-5 text-center text-white space-y-1 shadow-soft relative overflow-hidden">
-                <div className="text-[11px] uppercase tracking-widest text-[#E7D19C] font-bold">
-                  6-Digit Gate Clearance Code
-                </div>
-                <div className="font-mono text-4xl sm:text-5xl font-extrabold tracking-widest tabular-nums text-white my-1 selection:bg-[#C89B3C]">
-                  {prominentPass.pass_code}
-                </div>
-                <div className="flex items-center justify-center gap-1.5 text-xs text-[#E7D19C] font-semibold pt-1">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>
-                    Expires in: {formatCountdown(prominentPass.valid_until || prominentPass.expires_at || '').label}
-                  </span>
-                </div>
-              </div>
-
-              {/* High-Resolution QR Code Canvas */}
-              <div className="bg-[#FBF8F1] p-4 rounded-2xl border-2 border-dashed border-[#C89B3C] flex flex-col items-center justify-center space-y-2">
-                {qrDataUrl ? (
-                  <img
-                    src={qrDataUrl}
-                    alt="Gate QR Code"
-                    className="w-48 h-48 rounded-xl shadow-xs bg-white p-2 border border-[#E4D9BE]"
-                  />
-                ) : (
-                  <div className="w-48 h-48 flex items-center justify-center">
-                    <QrCode className="w-16 h-16 text-[#C89B3C] animate-pulse" />
-                  </div>
-                )}
-                <p className="text-[11px] text-[#10241A]/70 text-center font-medium">
-                  Show code to gate security or hold QR in front of the Gate Hub camera.
-                </p>
-              </div>
-
-              {/* Community Values Note */}
-              <div className="p-3 bg-[#F2EAD9] rounded-xl text-[11px] text-[#0A2F1C] border border-[#E4D9BE] leading-relaxed">
-                🕌 <strong>Lighthouse Estate Community:</strong> Visitors are expected to observe estate speed limits (20 km/h) and Islamic community decorum.
-              </div>
-
-              {/* Action Buttons: WhatsApp & Copy */}
-              <div className="space-y-2.5">
-                <button
-                  onClick={() => handleShareWhatsApp(prominentPass)}
-                  className="w-full py-3.5 px-4 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-all"
-                >
-                  <Share2 className="w-4 h-4 text-white" />
-                  <span>Share on WhatsApp (Pre-Filled)</span>
-                </button>
-
-                <button
-                  onClick={() => handleCopyToClipboard(prominentPass)}
-                  className="w-full py-3 px-4 rounded-xl bg-[#0F472A] hover:bg-[#0A2F1C] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all"
-                >
-                  {copyFeedback === prominentPass.pass_code ? (
-                    <>
-                      <Check className="w-4 h-4 text-emerald-400" />
-                      <span>Copied to Clipboard!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4 text-[#E7D19C]" />
-                      <span>Copy Invitation Message</span>
-                    </>
-                  )}
-                </button>
-
-                {prominentPass.status === 'active' && (
-                  <button
-                    onClick={() => handleRevokePass(prominentPass.id)}
-                    className="w-full py-2 text-xs font-bold text-red-600 hover:text-red-800 hover:underline text-center"
-                  >
-                    Revoke Pass
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* CREATE PASS MODAL ("New Pass" flow with all types) */}
-        {isCreateModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-white rounded-[16px] w-full max-w-lg p-6 sm:p-7 space-y-5 shadow-2xl border border-[#E4D9BE] max-h-[92vh] overflow-y-auto">
-              <div className="flex items-center justify-between border-b border-[#E4D9BE] pb-3">
+              <form onSubmit={handleCreatePass} className="space-y-4 text-xs">
                 <div>
-                  <h3 className="fraunces text-xl font-bold text-[#0A2F1C]">
-                    Issue New Gate Access Pass
-                  </h3>
-                  <p className="text-xs text-[#10241A]/70 mt-0.5">
-                    Generate an instant 6-digit passcode & QR payload for your guest.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setIsCreateModalOpen(false)}
-                  className="w-8 h-8 rounded-full bg-[#F2EAD9] text-[#10241A] hover:bg-[#E4D9BE] flex items-center justify-center text-sm font-bold"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <form onSubmit={handleGeneratePass} className="space-y-4">
-                {/* 1. Pass Type Picker */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#0A2F1C] mb-2">
-                    Select Pass Type *
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {[
-                      { type: 'guest', label: 'Guest (30 min)', desc: 'Standard visiting' },
-                      { type: 'delivery', label: 'Delivery (15 min)', desc: 'Dispatch / couriers' },
-                      { type: 'long_stay', label: 'Long-Stay', desc: 'Family / extended' },
-                      { type: 'exit', label: 'Exit Pass', desc: 'Departure token' },
-                      { type: 'group', label: 'Group Visit', desc: 'Multiple guests' },
-                    ].map((item) => (
-                      <button
-                        type="button"
-                        key={item.type}
-                        onClick={() => setPassType(item.type as PassType)}
-                        className={`p-3 rounded-xl border text-left transition-all ${
-                          passType === item.type
-                            ? 'bg-[#0F472A] text-white border-[#0F472A] shadow-xs'
-                            : 'bg-[#FBF8F1] border-[#E4D9BE] text-[#10241A] hover:bg-[#F2EAD9]'
-                        }`}
-                      >
-                        <div className="text-xs font-bold">{item.label}</div>
-                        <div
-                          className={`text-[10px] ${
-                            passType === item.type ? 'text-[#E7D19C]' : 'text-[#10241A]/60'
-                          }`}
-                        >
-                          {item.desc}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Conditional Fields: Group Guest Count */}
-                {passType === 'group' && (
-                  <div className="p-3.5 rounded-xl bg-[#F2EAD9]/80 border border-[#C89B3C] space-y-2">
-                    <label className="block text-xs font-bold text-[#0A2F1C]">
-                      Expected Number of Guests *
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        min={1}
-                        max={100}
-                        required
-                        value={guestCount}
-                        onChange={(e) => setGuestCount(parseInt(e.target.value) || 1)}
-                        className="w-28 px-3 py-2 rounded-xl border border-[#E4D9BE] text-sm bg-white font-mono font-bold focus:border-[#0F472A] outline-none"
-                      />
-                      <span className="text-xs text-[#10241A]/70">
-                        Valid for {guestCount} visitors entering under one delegation token.
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Conditional Fields: Long-Stay Date Picker */}
-                {passType === 'long_stay' && (
-                  <div className="p-3.5 rounded-xl bg-[#F2EAD9]/80 border border-[#C89B3C] space-y-2">
-                    <label className="block text-xs font-bold text-[#0A2F1C]">
-                      Valid Until (Expiry Date) *
-                    </label>
-                    <input
-                      type="date"
-                      required
-                      value={longStayDate}
-                      min={new Date().toISOString().split('T')[0]}
-                      onChange={(e) => setLongStayDate(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-[#E4D9BE] text-sm bg-white focus:border-[#0F472A] outline-none font-medium"
-                    />
-                  </div>
-                )}
-
-                {/* Visitor Full Name */}
-                <div>
-                  <label className="block text-xs font-semibold text-[#10241A]/80 mb-1">
-                    Visitor / Artisan Full Name *
+                  <label className="block font-bold text-[#516459] uppercase tracking-wider mb-1 text-[10.5px]">
+                    Visitor Full Name *
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Engr. Kabir Bello or DHL Dispatch"
+                    placeholder="e.g. Alhaji Mustapha Bello"
                     value={guestName}
                     onChange={(e) => setGuestName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E4D9BE] text-sm focus:border-[#0F472A] outline-none bg-[#FBF8F1]/50"
+                    className="w-full h-10 px-3 bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl text-sm focus:outline-none focus:border-[#3FAE7A]"
                   />
                 </div>
 
-                {/* Phone & Vehicle Plate */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-[#10241A]/80 mb-1">
-                      Phone Number (Optional)
+                    <label className="block font-bold text-[#516459] uppercase tracking-wider mb-1 text-[10.5px]">
+                      Phone (Optional)
                     </label>
                     <input
                       type="tel"
-                      placeholder="+234 800 000 0000"
+                      placeholder="0803 000 0000"
                       value={guestPhone}
                       onChange={(e) => setGuestPhone(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#E4D9BE] text-sm focus:border-[#0F472A] outline-none font-mono bg-[#FBF8F1]/50"
+                      className="w-full h-10 px-3 bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl text-sm focus:outline-none focus:border-[#3FAE7A]"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-xs font-semibold text-[#10241A]/80 mb-1">
-                      Vehicle Plate (Optional)
+                    <label className="block font-bold text-[#516459] uppercase tracking-wider mb-1 text-[10.5px]">
+                      Vehicle Plate
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. ABJ-492-XY"
+                      placeholder="e.g. KSF-419-AA"
                       value={guestPlate}
-                      onChange={(e) => setGuestPlate(e.target.value.toUpperCase())}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#E4D9BE] text-sm focus:border-[#0F472A] outline-none font-mono uppercase bg-[#FBF8F1]/50"
+                      onChange={(e) => setGuestPlate(e.target.value)}
+                      className="w-full h-10 px-3 bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl text-sm focus:outline-none focus:border-[#3FAE7A]"
                     />
                   </div>
                 </div>
 
-                {/* Notes */}
                 <div>
-                  <label className="block text-xs font-semibold text-[#10241A]/80 mb-1">
-                    Entry Purpose / Note (Optional)
+                  <label className="block font-bold text-[#516459] uppercase tracking-wider mb-1 text-[10.5px]">
+                    Pass Type
+                  </label>
+                  <select
+                    value={passType}
+                    onChange={(e) => setPassType(e.target.value as PassType)}
+                    className="w-full h-10 px-3 bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl text-sm focus:outline-none focus:border-[#3FAE7A]"
+                  >
+                    <option value="guest">Guest (Standard)</option>
+                    <option value="delivery">Delivery Dispatch</option>
+                    <option value="contractor">Artisan/Contractor</option>
+                    <option value="long_stay">Long Stay Visitor</option>
+                  </select>
+                </div>
+
+                {/* Conditional Fields for Artisan / Contractor */}
+                {passType === 'contractor' && (
+                  <div className="space-y-2.5 p-3 bg-[#F4F9F5] border border-[#3FAE7A]/25 rounded-xl">
+                    <div>
+                      <label className="block font-bold text-[#257A54] uppercase tracking-wider mb-1 text-[10.5px]">
+                        Date *
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={artisanDate}
+                        onChange={(e) => setArtisanDate(e.target.value)}
+                        className="w-full h-9 px-3 bg-white border border-[#E3EFE7] rounded-xl text-xs focus:outline-none focus:border-[#3FAE7A]"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block font-bold text-[#257A54] uppercase tracking-wider mb-1 text-[10.5px]">
+                          Start Time *
+                        </label>
+                        <input
+                          type="time"
+                          required
+                          value={artisanStartTime}
+                          onChange={(e) => setArtisanStartTime(e.target.value)}
+                          className="w-full h-9 px-3 bg-white border border-[#E3EFE7] rounded-xl text-xs focus:outline-none focus:border-[#3FAE7A]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-[#257A54] uppercase tracking-wider mb-1 text-[10.5px]">
+                          End Time *
+                        </label>
+                        <input
+                          type="time"
+                          required
+                          value={artisanEndTime}
+                          onChange={(e) => setArtisanEndTime(e.target.value)}
+                          className="w-full h-9 px-3 bg-white border border-[#E3EFE7] rounded-xl text-xs focus:outline-none focus:border-[#3FAE7A]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Conditional Fields for Long Stay Visitor */}
+                {passType === 'long_stay' && (
+                  <div className="p-3 bg-[#F4F9F5] border border-[#3FAE7A]/25 rounded-xl">
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block font-bold text-[#257A54] uppercase tracking-wider mb-1 text-[10.5px]">
+                          Valid From *
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={validFromDate}
+                          onChange={(e) => setValidFromDate(e.target.value)}
+                          className="w-full h-9 px-3 bg-white border border-[#E3EFE7] rounded-xl text-xs focus:outline-none focus:border-[#3FAE7A]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-[#257A54] uppercase tracking-wider mb-1 text-[10.5px]">
+                          Valid To *
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={validToDate}
+                          onChange={(e) => setValidToDate(e.target.value)}
+                          className="w-full h-9 px-3 bg-white border border-[#E3EFE7] rounded-xl text-xs focus:outline-none focus:border-[#3FAE7A]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block font-bold text-[#516459] uppercase tracking-wider mb-1 text-[10.5px]">
+                    Visit Purpose / Notes
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. Routine plumbing inspection, Friday prayer visitor"
+                    placeholder="e.g. Electrician maintenance, Family visit"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E4D9BE] text-sm focus:border-[#0F472A] outline-none bg-[#FBF8F1]/50"
+                    className="w-full h-10 px-3 bg-[#FBFDF9] border border-[#E3EFE7] rounded-xl text-sm focus:outline-none focus:border-[#3FAE7A]"
                   />
                 </div>
 
-                {/* Submit Actions */}
-                <div className="pt-3 border-t border-[#E4D9BE] flex items-center justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setIsCreateModalOpen(false)}
-                    className="px-4 py-2.5 rounded-xl border border-[#E4D9BE] text-xs font-bold text-[#10241A] hover:bg-[#F2EAD9]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-6 py-2.5 rounded-xl bg-[#0F472A] hover:bg-[#0A2F1C] text-white text-xs font-bold shadow-soft flex items-center gap-2"
-                  >
-                    <Sparkles className="w-4 h-4 text-[#E7D19C]" />
-                    <span>Generate & Activate Pass</span>
-                  </button>
-                </div>
+                <button
+                  type="submit"
+                  disabled={isCreating}
+                  className="w-full py-3 rounded-xl bg-[#E8C547] text-[#4A3B0A] font-bold text-sm hover:bg-[#DDB63A] active:scale-98 transition-all mt-2"
+                >
+                  Generate 6-Digit Pass
+                </button>
               </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* QR CODE PREVIEW MODAL */}
+      {qrModalPass && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm text-center shadow-2xl relative">
+            <button
+              onClick={() => setQrModalPass(null)}
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-[#FBFDF9] border border-[#E3EFE7] flex items-center justify-center text-[#516459]"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <span className="font-['Sora'] font-bold text-[10.5px] uppercase tracking-wider text-[#257A54]">
+              Scan at Gate Hub
+            </span>
+            <h3 className="font-['Sora'] font-bold text-lg text-[#16241D] mt-0.5">
+              {qrModalPass.guest_name}
+            </h3>
+
+            <div className="my-4 p-4 bg-[#FBFDF9] border border-[#E3EFE7] rounded-2xl inline-block">
+              {qrDataUrl ? (
+                <img src={qrDataUrl} alt="Pass QR Code" className="w-48 h-48 mx-auto" />
+              ) : (
+                <div className="w-48 h-48 flex items-center justify-center text-xs text-[#8AA096]">
+                  Generating QR Code...
+                </div>
+              )}
+            </div>
+
+            <div className="font-['Sora'] font-extrabold text-2xl text-[#257A54] tracking-widest font-mono mb-4">
+              {qrModalPass.pass_code}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleShareWhatsApp(qrModalPass)}
+                className="flex-1 py-2 rounded-xl bg-[#257A54] text-white font-bold text-xs flex items-center justify-center gap-1.5"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Share WhatsApp</span>
+              </button>
+              <button
+                onClick={() => setQrModalPass(null)}
+                className="px-4 py-2 rounded-xl bg-[#FBFDF9] border border-[#E3EFE7] text-[#16241D] font-bold text-xs"
+              >
+                Close
+              </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

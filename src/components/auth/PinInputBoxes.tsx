@@ -4,20 +4,22 @@ interface PinInputBoxesProps {
   length?: number;
   value: string;
   onChange: (value: string) => void;
-  variant?: 'standard' | 'security-pad';
   autoFocus?: boolean;
   disabled?: boolean;
-  isAlphanumeric?: boolean; // allow letters + digits (uppercase)
+  isAlphanumeric?: boolean; // 4 digits + 2 letters or all uppercase
+  hasError?: boolean;
+  className?: string;
 }
 
 export const PinInputBoxes: React.FC<PinInputBoxesProps> = ({
   length = 6,
   value,
   onChange,
-  variant = 'standard',
-  autoFocus = true,
+  autoFocus = false,
   disabled = false,
   isAlphanumeric = true,
+  hasError = false,
+  className = '',
 }) => {
   const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -78,24 +80,20 @@ export const PinInputBoxes: React.FC<PinInputBoxesProps> = ({
     inputsRef.current[targetIdx]?.focus();
   };
 
-  const isSecurityPad = variant === 'security-pad';
-
   return (
-    <div
-      className={`flex items-center justify-center gap-2 sm:gap-3 ${
-        isSecurityPad ? 'p-2' : ''
-      }`}
-    >
+    <div className={`flex items-center gap-[7px] mb-1 w-full ${className}`}>
       {Array.from({ length }).map((_, idx) => {
         const char = charArray[idx] || '';
-        const isFilled = Boolean(char);
+        const isNumericSlot = idx < 4;
 
         return (
           <input
             key={idx}
-            ref={(el) => (inputsRef.current[idx] = el)}
+            ref={(el) => {
+              inputsRef.current[idx] = el;
+            }}
             type="text"
-            inputMode={isAlphanumeric ? 'text' : 'numeric'}
+            inputMode={isNumericSlot ? 'numeric' : 'text'}
             maxLength={1}
             value={char}
             disabled={disabled}
@@ -103,13 +101,10 @@ export const PinInputBoxes: React.FC<PinInputBoxesProps> = ({
             onKeyDown={(e) => handleKeyDown(idx, e)}
             onPaste={handlePaste}
             className={`
-              text-center font-bold transition-all duration-150 outline-none
-              ${
-                isSecurityPad
-                  ? 'w-14 h-16 sm:w-16 sm:h-20 text-2xl sm:text-3xl rounded-xl border-2 bg-white text-[#0A2F1C] border-[#0F472A] shadow-md focus:border-[#C89B3C] focus:ring-4 focus:ring-[#C89B3C]/20'
-                  : 'w-11 h-13 sm:w-12 sm:h-14 text-xl sm:text-2xl rounded-xl border bg-white text-[#10241A] border-[#E4D9BE] shadow-xs focus:border-[#0F472A] focus:ring-2 focus:ring-[#0F472A]/15'
-              }
-              ${isFilled ? (isSecurityPad ? 'bg-[#F2EAD9]/60 font-mono' : 'border-[#0F472A] bg-[#FBF8F1]') : ''}
+              w-full h-[50px] text-center font-['Sora',sans-serif] font-bold text-[18px]
+              rounded-[11px] bg-[#FBFDF9] text-[#257A54] uppercase transition-all duration-150 outline-none
+              ${hasError ? 'border-[1.5px] border-[#A32D2D]' : 'border-[1.5px] border-[#E3EFE7]'}
+              focus:border-[#3FAE7A] focus:ring-4 focus:ring-[#3FAE7A]/15
               disabled:opacity-50 disabled:bg-gray-100
             `}
           />

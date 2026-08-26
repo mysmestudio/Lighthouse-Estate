@@ -1,6 +1,6 @@
 {
-  "name": "Lighthouse Estate Portal",
-  "description": "Mobile-first Progressive Web App for estate access control, domestic staff onboarding & KYC lifecycle, real-time emergency SOS distress signaling, visitor passes, security gate operations, and community notices.",
+  "name": "Light House Estate, Lekki",
+  "description": "Mobile-first Progressive Web App for Light House Estate, Lekki - access control, domestic staff onboarding & KYC lifecycle, real-time emergency SOS distress signaling, visitor passes, security gate operations, and community notices.",
   "requestFramePermissions": [
     "camera"
   ],

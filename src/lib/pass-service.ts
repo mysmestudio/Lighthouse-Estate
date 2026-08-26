@@ -2,6 +2,7 @@ import QRCode from 'qrcode';
 import { VisitorPass, PassType, PassVerificationAttempt, VerificationResult, AppUser, AccessLog } from '../types';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { getStoredPasses, saveStoredPasses, getStoredAccessLogs, saveStoredAccessLogs } from './estate-data';
+import { createOverstayAlert, checkAndEscalateOverstays } from './alert-service';
 
 const ATTEMPTS_KEY = 'lighthouse_pass_verification_attempts_v1';
 
@@ -24,11 +25,12 @@ export function generateUnique6DigitCode(existingActiveCodes: string[] = []): st
 
 /**
  * Calculate expiry date based on Pass Type specification:
- * - guest: 30 minutes
- * - delivery: 15 minutes
- * - long_stay: until custom selected date/time (or default 7 days)
- * - exit: 2 hours
- * - group: 4 hours
+ * - guest: 30 minutes (single entry)
+ * - delivery: 15 minutes (single entry)
+ * - contractor: window on artisan date (e.g. 08:00 - 17:00)
+ * - long_stay: multi-entry until valid_to date (23:59:59)
+ * - exit: 2 hours (single entry)
+ * - group: 4 hours (multi/group)
  */
 export function calculatePassExpiry(
   passType: PassType,
@@ -49,7 +51,7 @@ export function calculatePassExpiry(
     case 'long_stay':
     case 'recurring':
       if (customLongStayDate) {
-        const parsed = new Date(customLongStayDate);
+        const parsed = new Date(customLongStayDate + 'T23:59:59');
         if (!isNaN(parsed.getTime())) {
           expiryDate = parsed;
         } else {
@@ -58,6 +60,9 @@ export function calculatePassExpiry(
       } else {
         expiryDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
       }
+      break;
+    case 'contractor':
+      expiryDate = new Date(now.getTime() + 12 * 60 * 60 * 1000); // end of work day
       break;
     case 'exit':
       expiryDate = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours
@@ -104,23 +109,31 @@ export async function generatePassQRCode(passId: string, passCode: string): Prom
 }
 
 /**
- * Format the official Lighthouse Estate WhatsApp invitation message.
+ * Format the official Light House Estate, Lekki WhatsApp invitation message.
  */
 export function buildWhatsAppShareMessage(pass: VisitorPass): string {
-  const expiryDate = new Date(pass.valid_until || pass.expires_at || '');
-  const expiryFormatted = !isNaN(expiryDate.getTime())
-    ? expiryDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) +
-      ', ' +
-      expiryDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
-    : 'Valid for current visit';
+  let timeDetail = '';
+  if (pass.pass_type === 'contractor' && pass.artisan_date) {
+    timeDetail = `📅 Work Date: ${pass.artisan_date}\n⏰ Authorized Window: ${pass.start_time || '08:00'} - ${pass.end_time || '17:00'}`;
+  } else if (pass.pass_type === 'long_stay' && pass.valid_to) {
+    timeDetail = `📅 Valid Period: ${pass.valid_from ? pass.valid_from.split('T')[0] : 'Today'} to ${pass.valid_to} (Multi-Entry)`;
+  } else {
+    const expiryDate = new Date(pass.valid_until || pass.expires_at || '');
+    const expiryFormatted = !isNaN(expiryDate.getTime())
+      ? expiryDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) +
+        ', ' +
+        expiryDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+      : 'Valid for current visit';
+    timeDetail = `⏱️ Valid until ${expiryFormatted}`;
+  }
 
   const residentPhone = pass.resident_phone || '+234 800 000 0000';
 
-  return `Your access code for Lighthouse Estate is: ${pass.pass_code}
-⏱️ Valid until ${expiryFormatted}
+  return `Your access code for Light House Estate, Lekki is: ${pass.pass_code}
+${timeDetail}
 Please show this to estate security at the gate (or let them scan the QR).
 📞 Host: ${pass.resident_name}, ${residentPhone}, House ${pass.house_number} - ${pass.house_unit}
-🕌 Lighthouse Estate is a Muslim Residential Community. Visitors are expected to respect community values.`;
+🕌 Light House Estate is a Muslim Residential Community. Visitors are expected to respect community values.`;
 }
 
 /**
@@ -160,6 +173,13 @@ export async function verifyGatePassAtGatehouse(params: {
   const rawCode = (code || '').trim();
   const passId = (pass_id || '').trim();
 
+  // Trigger background check for overstays to keep alert store synchronized
+  try {
+    checkAndEscalateOverstays();
+  } catch (e) {
+    console.error('Background overstay check error:', e);
+  }
+
   // Try invoking Supabase Edge Function first if configured
   if (isSupabaseConfigured) {
     try {
@@ -197,7 +217,7 @@ export async function verifyGatePassAtGatehouse(params: {
     }
   }
 
-  // Resilient Local Verification Engine (Deno Edge Function equivalent)
+  // Resilient Local Verification Engine
   const now = new Date();
   const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000).getTime();
   const attempts = getStoredVerificationAttempts();
@@ -261,13 +281,13 @@ export async function verifyGatePassAtGatehouse(params: {
       status: 'not_found',
       reason: 'not_found',
       actionTaken: 'denied',
-      message: 'Access pass code not found in Lighthouse Estate security directory.',
+      message: 'Access pass code not found in Light House Estate security directory.',
       timestamp: now.toISOString(),
     };
   }
 
   const pass = allPasses[passIndex];
-  const expiryDate = new Date(pass.expires_at || pass.valid_until);
+  const isMultiEntry = pass.entry_type === 'multi' || pass.pass_type === 'long_stay';
 
   // 3. CHECK REVOKED
   if (pass.status === 'revoked') {
@@ -309,7 +329,293 @@ export async function verifyGatePassAtGatehouse(params: {
     };
   }
 
-  // 4. CHECK EXPIRY
+  // 4. MULTI-ENTRY (LONG STAY VISITOR) LOGIC & AUTO-EXPIRY
+  if (isMultiEntry) {
+    // Compare current date against valid_to / valid_until live at scan time
+    let expiryTimestamp: Date;
+    if (pass.valid_to) {
+      expiryTimestamp = new Date(`${pass.valid_to}T23:59:59`);
+    } else if (pass.valid_until) {
+      expiryTimestamp = new Date(pass.valid_until);
+    } else {
+      expiryTimestamp = new Date(Date.now() + 7 * 24 * 3600000);
+    }
+
+    if (now.getTime() > expiryTimestamp.getTime() || pass.status === 'expired') {
+      pass.status = 'expired';
+      allPasses[passIndex] = pass;
+      saveStoredPasses(allPasses);
+
+      recordVerificationAttempt({
+        id: `att-${Date.now()}`,
+        pass_id: pass.id,
+        pass_code: pass.pass_code,
+        attempted_at: now.toISOString(),
+        status: 'failed',
+        reason: 'expired',
+        guard_name,
+        verified_method: method,
+        visitor_name: pass.guest_name,
+        house_info: `House ${pass.house_number} (${pass.house_unit})`,
+      });
+
+      return {
+        success: false,
+        code: pass.pass_code,
+        status: 'expired',
+        reason: 'expired',
+        actionTaken: 'denied',
+        message: `This pass has expired. Validity ended on ${pass.valid_to || expiryTimestamp.toLocaleDateString()}.`,
+        timestamp: now.toISOString(),
+        pass: {
+          id: pass.id,
+          guest_name: pass.guest_name,
+          pass_type: pass.pass_type,
+          guest_count: pass.guest_count || 1,
+          guest_phone: pass.guest_phone,
+          guest_plate_number: pass.guest_plate_number,
+          house_number: pass.house_number,
+          house_unit: pass.house_unit,
+          resident_name: pass.resident_name,
+          resident_phone: pass.resident_phone,
+          valid_until: pass.valid_until,
+          status: 'expired',
+        },
+      };
+    }
+
+    // Check valid_from start date
+    if (pass.valid_from) {
+      const fromDate = new Date(`${pass.valid_from.split('T')[0]}T00:00:00`);
+      if (now.getTime() < fromDate.getTime()) {
+        return {
+          success: false,
+          code: pass.pass_code,
+          status: 'active',
+          reason: 'expired',
+          actionTaken: 'denied',
+          message: `Pass is not yet active. Valid from ${pass.valid_from.split('T')[0]}.`,
+          timestamp: now.toISOString(),
+        };
+      }
+    }
+
+    // Determine direction for multi-entry from recent access logs
+    const allLogs = getStoredAccessLogs();
+    const passLogs = allLogs.filter((l) => l.pass_code === pass.pass_code || l.pass_id === pass.id);
+    const sortedLogs = [...passLogs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    const isCurrentlyInside = sortedLogs.length > 0 && sortedLogs[0].direction === 'in';
+
+    const direction: 'in' | 'out' = isCurrentlyInside ? 'out' : 'in';
+    const actionTaken = direction === 'in' ? 'granted_entry' : 'granted_exit';
+    const msg = direction === 'in' 
+      ? `ACCESS GRANTED: Multi-entry guest arrival cleared. Valid through ${pass.valid_to || expiryTimestamp.toLocaleDateString()}.` 
+      : `EXIT CLEARANCE GRANTED: Multi-entry guest departure logged.`;
+
+    // Keep pass status active (multi-entry allows repeated scans)
+    pass.status = 'active';
+    if (direction === 'in') {
+      pass.verified_at = now.toISOString();
+      pass.verified_by = guard_name;
+    } else {
+      pass.checked_out_at = now.toISOString();
+    }
+    allPasses[passIndex] = pass;
+    saveStoredPasses(allPasses);
+
+    recordVerificationAttempt({
+      id: `att-${Date.now()}`,
+      pass_id: pass.id,
+      pass_code: pass.pass_code,
+      attempted_at: now.toISOString(),
+      status: 'success',
+      reason: direction === 'in' ? 'success' : 'checked_out',
+      guard_name,
+      verified_method: method,
+      visitor_name: pass.guest_name,
+      house_info: `House ${pass.house_number} (${pass.house_unit})`,
+    });
+
+    const newLog: AccessLog = {
+      id: `log-${Date.now()}`,
+      pass_id: pass.id,
+      pass_code: pass.pass_code,
+      visitor_name: pass.guest_name,
+      house_info: `House ${pass.house_number} (${pass.house_unit})`,
+      direction,
+      guard_name,
+      timestamp: now.toISOString(),
+      vehicle_plate: pass.guest_plate_number,
+      verified_method: method,
+      notes: `Multi-entry pass scan (${direction.toUpperCase()}). Valid to: ${pass.valid_to || 'Date'}`,
+    };
+    saveStoredAccessLogs([newLog, ...allLogs]);
+
+    return {
+      success: true,
+      code: pass.pass_code,
+      status: 'active',
+      actionTaken,
+      reason: 'success',
+      message: msg,
+      pass: {
+        id: pass.id,
+        guest_name: pass.guest_name,
+        pass_type: pass.pass_type,
+        guest_count: pass.guest_count || 1,
+        guest_phone: pass.guest_phone,
+        guest_plate_number: pass.guest_plate_number,
+        house_number: pass.house_number,
+        house_unit: pass.house_unit,
+        resident_name: pass.resident_name,
+        resident_phone: pass.resident_phone,
+        valid_until: pass.valid_until,
+        status: 'active',
+      },
+      timestamp: now.toISOString(),
+    };
+  }
+
+  // 5. ARTISAN / CONTRACTOR TIME WINDOW VALIDATION
+  if (pass.pass_type === 'contractor' || (pass.artisan_date && pass.start_time && pass.end_time)) {
+    const todayDateStr = now.toISOString().split('T')[0];
+    const passDateStr = pass.artisan_date || todayDateStr;
+
+    // Check scheduled date & time window for entry
+    const [startH, startM] = (pass.start_time || '08:00').split(':').map(Number);
+    const [endH, endM] = (pass.end_time || '17:00').split(':').map(Number);
+
+    const windowStart = new Date(passDateStr);
+    windowStart.setHours(startH || 8, startM || 0, 0, 0);
+
+    const windowEnd = new Date(passDateStr);
+    windowEnd.setHours(endH || 17, endM || 0, 0, 0);
+
+    // If attempting fresh ENTRY outside authorized window
+    if (pass.status === 'active') {
+      const isOutsideWindow = 
+        todayDateStr !== passDateStr || 
+        now.getTime() < windowStart.getTime() || 
+        now.getTime() > windowEnd.getTime();
+
+      if (isOutsideWindow) {
+        recordVerificationAttempt({
+          id: `att-${Date.now()}`,
+          pass_id: pass.id,
+          pass_code: pass.pass_code,
+          attempted_at: now.toISOString(),
+          status: 'failed',
+          reason: 'expired',
+          guard_name,
+          verified_method: method,
+          visitor_name: pass.guest_name,
+          house_info: `House ${pass.house_number} (${pass.house_unit})`,
+        });
+
+        const detailMsg = todayDateStr !== passDateStr
+          ? `Outside authorized date. Pass is only valid on ${passDateStr} between ${pass.start_time || '08:00'} and ${pass.end_time || '17:00'}.`
+          : `Outside authorized hours. Contractor entry is only permitted between ${pass.start_time || '08:00'} and ${pass.end_time || '17:00'}.`;
+
+        return {
+          success: false,
+          code: pass.pass_code,
+          status: 'active',
+          reason: 'expired',
+          actionTaken: 'denied',
+          message: `ACCESS DENIED: ${detailMsg}`,
+          timestamp: now.toISOString(),
+          pass: {
+            id: pass.id,
+            guest_name: pass.guest_name,
+            pass_type: pass.pass_type,
+            guest_count: pass.guest_count || 1,
+            guest_phone: pass.guest_phone,
+            guest_plate_number: pass.guest_plate_number,
+            house_number: pass.house_number,
+            house_unit: pass.house_unit,
+            resident_name: pass.resident_name,
+            resident_phone: pass.resident_phone,
+            valid_until: pass.valid_until,
+            status: pass.status,
+          },
+        };
+      }
+    }
+
+    // If checking OUT (Exit scan) after End Time -> flag overstay & escalate to Resident and Admin, but still grant exit!
+    if (pass.status === 'used') {
+      const isOverstaying = now.getTime() > windowEnd.getTime();
+      if (isOverstaying) {
+        pass.overstayed = true;
+        createOverstayAlert(pass, 'checkout_detection');
+      }
+
+      pass.status = 'out';
+      pass.checked_out_at = now.toISOString();
+      allPasses[passIndex] = pass;
+      saveStoredPasses(allPasses);
+
+      recordVerificationAttempt({
+        id: `att-${Date.now()}`,
+        pass_id: pass.id,
+        pass_code: pass.pass_code,
+        attempted_at: now.toISOString(),
+        status: 'success',
+        reason: 'checked_out',
+        guard_name,
+        verified_method: method,
+        visitor_name: pass.guest_name,
+        house_info: `House ${pass.house_number} (${pass.house_unit})`,
+      });
+
+      const allLogs = getStoredAccessLogs();
+      const newLog: AccessLog = {
+        id: `log-${Date.now()}`,
+        pass_id: pass.id,
+        pass_code: pass.pass_code,
+        visitor_name: pass.guest_name,
+        house_info: `House ${pass.house_number} (${pass.house_unit})`,
+        direction: 'out',
+        guard_name,
+        timestamp: now.toISOString(),
+        vehicle_plate: pass.guest_plate_number,
+        verified_method: method,
+        notes: isOverstaying 
+          ? `Outbound contractor exit. ⚠️ Overstay logged: departed past ${pass.end_time || '17:00'}. Escalate to Resident & Admin.` 
+          : `Outbound contractor exit clearance completed.`,
+      };
+      saveStoredAccessLogs([newLog, ...allLogs]);
+
+      return {
+        success: true,
+        code: pass.pass_code,
+        status: 'out',
+        actionTaken: 'granted_exit',
+        reason: 'checked_out',
+        message: isOverstaying
+          ? `EXIT CLEARANCE GRANTED: Outbound departure registered (⚠️ Late departure past ${pass.end_time || '17:00'} flagged to Resident & Admin).`
+          : 'EXIT CLEARANCE GRANTED: Outbound contractor departure registered.',
+        pass: {
+          id: pass.id,
+          guest_name: pass.guest_name,
+          pass_type: pass.pass_type,
+          guest_count: pass.guest_count || 1,
+          guest_phone: pass.guest_phone,
+          guest_plate_number: pass.guest_plate_number,
+          house_number: pass.house_number,
+          house_unit: pass.house_unit,
+          resident_name: pass.resident_name,
+          resident_phone: pass.resident_phone,
+          valid_until: pass.valid_until,
+          status: 'out',
+        },
+        timestamp: now.toISOString(),
+      };
+    }
+  }
+
+  // 6. STANDARD SINGLE-ENTRY EXPIRY CHECK (Guest, Delivery, Exit)
+  const expiryDate = new Date(pass.expires_at || pass.valid_until);
   if (expiryDate.getTime() < now.getTime() || pass.status === 'expired') {
     pass.status = 'expired';
     allPasses[passIndex] = pass;
@@ -353,7 +659,7 @@ export async function verifyGatePassAtGatehouse(params: {
     };
   }
 
-  // 5. STATE MACHINE
+  // 7. STANDARD SINGLE-ENTRY STATE MACHINE
   // Case A: Fresh ACTIVE Pass -> Mark USED (Entry Granted)
   if (pass.status === 'active') {
     pass.status = 'used';

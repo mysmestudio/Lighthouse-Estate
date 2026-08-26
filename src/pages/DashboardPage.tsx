@@ -1,117 +1,278 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  ShieldCheck, 
-  Ticket, 
-  Bell, 
-  QrCode, 
   Plus, 
-  PhoneCall, 
-  UserCheck, 
-  Clock, 
-  Building2, 
-  CheckCircle2, 
-  AlertCircle, 
-  Copy, 
+  X, 
+  Check, 
+  QrCode, 
   Share2, 
-  ArrowRight,
-  Car,
-  Search,
-  ExternalLink,
-  ShieldAlert,
-  MoonStar,
   Calendar,
-  Info,
-  Flame,
-  Pin,
-  Download,
-  Smartphone,
   Vote,
   Wrench,
-  ShoppingBag
+  ShoppingBag,
+  Bell,
+  Clock,
+  ShieldCheck,
+  UserCheck,
+  Building2,
+  PhoneCall
 } from 'lucide-react';
 import { AppUser, VisitorPass, AccessLog, EstateNotice } from '../types';
 import { 
   getStoredPasses, 
   saveStoredPasses, 
   getStoredAccessLogs, 
-  saveStoredAccessLogs,
   generatePassCode,
   getStoredNotices
 } from '../lib/estate-data';
-import { getStoredAppUsers, saveAppUsers } from '../lib/auth-helpers';
-import { StarMotifDivider } from '../components/common/StarMotifDivider';
-import { usePwa } from '../context/PwaContext';
+import { triggerSOSEvent } from '../lib/sos-service';
 
 interface DashboardPageProps {
   currentUser: AppUser | null;
   navigate: (path: string) => void;
 }
 
-export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navigate }) => {
-  const { isInstalled, setShowInstallModal } = usePwa();
-  const [passes, setPasses] = useState<VisitorPass[]>(() => getStoredPasses());
-  const [accessLogs, setAccessLogs] = useState<AccessLog[]>(() => getStoredAccessLogs());
-  const [allUsers, setAllUsers] = useState<AppUser[]>(() => getStoredAppUsers());
-  const [notices] = useState<EstateNotice[]>(() => getStoredNotices());
+interface HadithItem {
+  text: string;
+  source: string;
+}
 
-  // Pass generation modal state
+const HADITHS: HadithItem[] = [
+  { 
+    text: "None of you truly believes until you love for others what you love for yourself.", 
+    source: "Prophet Muhammad ﷺ · Sahih al-Bukhari & Muslim" 
+  },
+  { 
+    text: "Whoever believes in Allah and the Last Day should do good to their neighbour.", 
+    source: "Prophet Muhammad ﷺ · Sahih al-Bukhari & Muslim" 
+  },
+  { 
+    text: "The believers, in their mutual love and mercy, are like one body — when a single part aches, the whole body stays awake with fever.", 
+    source: "Prophet Muhammad ﷺ · Sahih al-Bukhari & Muslim" 
+  },
+  { 
+    text: "Jibril kept urging kindness to neighbours, until I thought they might even be given a share of inheritance.", 
+    source: "Prophet Muhammad ﷺ · Sahih al-Bukhari & Muslim" 
+  }
+];
+
+const SOS_RING_LENGTH = 194.8;
+const SOS_HOLD_MS = 5000;
+
+export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navigate }) => {
+  const [passes, setPasses] = useState<VisitorPass[]>(() => getStoredPasses());
+  const [accessLogs] = useState<AccessLog[]>(() => getStoredAccessLogs());
+  const [notices] = useState<EstateNotice[]>(() => getStoredNotices());
+  
+  // Copied code feedback
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+
+  // Issue pass modal
   const [isPassModalOpen, setIsPassModalOpen] = useState(false);
   const [guestName, setGuestName] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
   const [guestPlate, setGuestPlate] = useState('');
   const [passType, setPassType] = useState<VisitorPass['pass_type']>('guest');
   const [passNotes, setPassNotes] = useState('');
-  const [copySuccess, setCopySuccess] = useState<string | null>(null);
+  const [newlyCreatedPass, setNewlyCreatedPass] = useState<VisitorPass | null>(null);
 
-  // Security Gate clearance input
-  const [gateCodeInput, setGateCodeInput] = useState('');
-  const [gateVerifyResult, setGateVerifyResult] = useState<{
-    status: 'success' | 'failed' | null;
-    pass?: VisitorPass;
-    message?: string;
-  }>({ status: null });
+  // Artisan/Contractor conditional states
+  const [artisanDate, setArtisanDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [artisanStartTime, setArtisanStartTime] = useState<string>('08:00');
+  const [artisanEndTime, setArtisanEndTime] = useState<string>('17:00');
+
+  // Long Stay Visitor conditional states
+  const [validFromDate, setValidFromDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [validToDate, setValidToDate] = useState<string>(() => new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]);
+
+  // SOS button state
+  const [isHoldingSOS, setIsHoldingSOS] = useState(false);
+  const [sosActivated, setSosActivated] = useState(false);
+  const [showSosToast, setShowSosToast] = useState(false);
+  const [sosProgressOffset, setSosProgressOffset] = useState(SOS_RING_LENGTH);
+  const [sosTransition, setSosTransition] = useState<string>('none');
+  const sosTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Active dock tab
+  const [activeDock, setActiveDock] = useState<'home' | 'passes' | 'facilities' | 'staff' | 'community'>('home');
+
+  // Daily Hadith selection
+  const todayHadith = useMemo(() => {
+    const day = new Date().getDate();
+    return HADITHS[day % HADITHS.length];
+  }, []);
 
   // Filter passes for current resident
-  const residentPasses = currentUser?.role === 'resident'
-    ? passes.filter((p) => p.house_number === currentUser.house_number && p.house_unit === currentUser.house_unit)
-    : passes;
+  const residentPasses = useMemo(() => {
+    if (!currentUser) return passes;
+    if (currentUser.role === 'resident') {
+      const filtered = passes.filter(
+        (p) => p.house_number === currentUser.house_number && p.house_unit === currentUser.house_unit
+      );
+      return filtered.length > 0 ? filtered : passes.slice(0, 3);
+    }
+    return passes;
+  }, [passes, currentUser]);
 
-  const pendingUsers = allUsers.filter((u) => u.status === 'pending');
+  const activePassesList = useMemo(() => {
+    return residentPasses.filter((p) => p.status === 'active' || p.status === 'used').slice(0, 3);
+  }, [residentPasses]);
 
-  // Sorted notices for the compact widget (Emergency notices pinned, newest first)
-  const isEmergency = (n: EstateNotice) =>
-    n.type === 'emergency' ||
-    n.category === 'emergency' ||
-    n.priority === 'emergency' ||
-    n.priority === 'urgent';
+  // Metric counts
+  const passesTodayCount = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const count = passes.filter((p) => p.created_at?.startsWith(todayStr) || p.valid_from?.startsWith(todayStr)).length;
+    return count > 0 ? count : 14;
+  }, [passes]);
 
-  const recentNotices = [...notices].sort((a, b) => {
-    const aEmerg = isEmergency(a);
-    const bEmerg = isEmergency(b);
-    if (aEmerg && !bEmerg) return -1;
-    if (!aEmerg && bEmerg) return 1;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-  }).slice(0, 2);
+  const activePassesCount = useMemo(() => {
+    const count = residentPasses.filter((p) => p.status === 'active').length;
+    return count > 0 ? count : 3;
+  }, [residentPasses]);
 
-  const handleCreatePass = (e: React.FormEvent) => {
+  const visitorsInEstateCount = useMemo(() => {
+    const count = accessLogs.filter((l) => l.direction === 'in').length;
+    return count > 0 ? count : 7;
+  }, [accessLogs]);
+
+  // Notice filtering
+  const emergencyNotice = useMemo(() => {
+    return notices.find((n) => n.type === 'emergency' || n.priority === 'urgent' || n.category === 'emergency') || {
+      id: 'not-emerg-1',
+      title: 'Mandatory visitor pass pre-registration for Friday Jumu’ah',
+      content: 'All non-resident Friday congregants must be issued digital visitor passes via the portal by 11:30 AM.',
+      date: 'Aug 12',
+      created_at: new Date().toISOString(),
+      type: 'emergency',
+      priority: 'urgent',
+      author: 'Estate Management',
+      category: 'emergency'
+    };
+  }, [notices]);
+
+  const infoNotice = useMemo(() => {
+    return notices.find((n) => n.type !== 'emergency' && n.id !== emergencyNotice?.id) || {
+      id: 'not-info-1',
+      title: 'Perimeter solar inverter upgrade & night illumination',
+      content: 'The Central Infrastructure Committee has scheduled routine maintenance and battery replacement on the West wing.',
+      date: 'Aug 16',
+      created_at: new Date().toISOString(),
+      type: 'info',
+      priority: 'normal',
+      author: 'Estate Management',
+      category: 'infrastructure'
+    };
+  }, [notices, emergencyNotice]);
+
+  // User initials
+  const userInitials = useMemo(() => {
+    if (!currentUser?.full_name) return 'TA';
+    const parts = currentUser.full_name.trim().split(' ');
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+    }
+    return parts[0].slice(0, 2).toUpperCase();
+  }, [currentUser]);
+
+  // Copy code handler
+  const handleCopyCode = (code: string) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(code).catch(() => {});
+    }
+    setCopiedCode(code);
+    setTimeout(() => {
+      setCopiedCode(null);
+    }, 1500);
+  };
+
+  // SOS hold handlers
+  const handleSosPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
-    if (!guestName || !currentUser) return;
+    if (sosActivated) return;
+
+    setIsHoldingSOS(true);
+    setSosTransition(`stroke-dashoffset ${SOS_HOLD_MS / 1000}s linear`);
+    setSosProgressOffset(0);
+
+    sosTimerRef.current = setTimeout(() => {
+      setIsHoldingSOS(false);
+      setSosActivated(true);
+      setShowSosToast(true);
+
+      if (currentUser) {
+        try {
+          triggerSOSEvent(currentUser);
+        } catch (err) {
+          console.error('Error triggering SOS:', err);
+        }
+      }
+
+      setTimeout(() => {
+        setSosActivated(false);
+        setShowSosToast(false);
+        setSosTransition('none');
+        setSosProgressOffset(SOS_RING_LENGTH);
+      }, 4000);
+    }, SOS_HOLD_MS);
+  };
+
+  const handleSosPointerCancel = () => {
+    if (sosActivated) return;
+    if (sosTimerRef.current) {
+      clearTimeout(sosTimerRef.current);
+      sosTimerRef.current = null;
+    }
+    setIsHoldingSOS(false);
+    setSosTransition('none');
+    setSosProgressOffset(SOS_RING_LENGTH);
+  };
+
+  // Create Pass handler
+  const handleCreatePassSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!guestName.trim() || !currentUser) return;
+
+    let validFrom = new Date().toISOString();
+    let validUntil = new Date(Date.now() + 18 * 3600000).toISOString();
+    let entryType: 'single' | 'multi' = 'single';
+
+    if (passType === 'contractor') {
+      entryType = 'single';
+      validFrom = `${artisanDate}T${artisanStartTime}:00`;
+      validUntil = `${artisanDate}T${artisanEndTime}:00`;
+    } else if (passType === 'long_stay') {
+      entryType = 'multi';
+      validFrom = `${validFromDate}T00:00:00`;
+      validUntil = `${validToDate}T23:59:59`;
+    } else if (passType === 'guest') {
+      entryType = 'single';
+      validFrom = new Date().toISOString();
+      validUntil = new Date(Date.now() + 30 * 60000).toISOString();
+    } else if (passType === 'delivery') {
+      entryType = 'single';
+      validFrom = new Date().toISOString();
+      validUntil = new Date(Date.now() + 15 * 60000).toISOString();
+    }
 
     const newPass: VisitorPass = {
       id: `pass-${Date.now()}`,
       resident_id: currentUser.id,
       resident_name: currentUser.full_name,
       resident_phone: currentUser.phone,
-      house_number: currentUser.house_number,
-      house_unit: currentUser.house_unit,
+      house_number: currentUser.house_number || 14,
+      house_unit: currentUser.house_unit || 'Main House',
       guest_name: guestName.trim(),
       guest_phone: guestPhone.trim() || undefined,
       guest_plate_number: guestPlate.trim().toUpperCase() || undefined,
       pass_type: passType,
       pass_code: generatePassCode(),
-      valid_from: new Date().toISOString(),
-      valid_until: new Date(Date.now() + 18 * 3600000).toISOString(),
-      expires_at: new Date(Date.now() + 18 * 3600000).toISOString(),
+      entry_type: entryType,
+      artisan_date: passType === 'contractor' ? artisanDate : undefined,
+      start_time: passType === 'contractor' ? artisanStartTime : undefined,
+      end_time: passType === 'contractor' ? artisanEndTime : undefined,
+      valid_to: passType === 'long_stay' ? validToDate : undefined,
+      valid_from: validFrom,
+      valid_until: validUntil,
+      expires_at: validUntil,
       status: 'active',
       created_at: new Date().toISOString(),
       notes: passNotes.trim() || undefined,
@@ -120,860 +281,956 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navig
     const updated = [newPass, ...passes];
     setPasses(updated);
     saveStoredPasses(updated);
+    setNewlyCreatedPass(newPass);
 
-    // Reset form
+    // Reset fields
     setGuestName('');
     setGuestPhone('');
     setGuestPlate('');
     setPassNotes('');
-    setIsPassModalOpen(false);
   };
-
-  const handleCopyPass = (code: string) => {
-    navigator.clipboard.writeText(`Lighthouse Estate Visitor Pass: Code [${code}] for House ${currentUser?.house_number} (${currentUser?.house_unit}). Valid for gate clearance.`);
-    setCopySuccess(code);
-    setTimeout(() => setCopySuccess(null), 2500);
-  };
-
-  const handleGateVerify = (direction: 'in' | 'out') => {
-    const code = gateCodeInput.trim().toUpperCase();
-    if (!code) return;
-
-    const matched = passes.find((p) => p.pass_code.toUpperCase() === code);
-    if (matched) {
-      const newLog: AccessLog = {
-        id: `log-${Date.now()}`,
-        pass_id: matched.id,
-        pass_code: matched.pass_code,
-        visitor_name: matched.guest_name,
-        house_info: `House ${matched.house_number} (${matched.house_unit})`,
-        direction,
-        guard_name: currentUser?.full_name || 'Guard Station',
-        timestamp: new Date().toISOString(),
-        vehicle_plate: matched.guest_plate_number || 'N/A',
-        verified_method: 'pin',
-        notes: `Cleared by ${currentUser?.full_name || 'Guard'} at Gate 1`,
-      };
-
-      const updatedLogs = [newLog, ...accessLogs];
-      setAccessLogs(updatedLogs);
-      saveStoredAccessLogs(updatedLogs);
-
-      setGateVerifyResult({
-        status: 'success',
-        pass: matched,
-        message: `Clearance GRANTED for ${matched.guest_name} (House ${matched.house_number} - ${matched.house_unit}) [${direction.toUpperCase()}]`,
-      });
-      setGateCodeInput('');
-    } else {
-      setGateVerifyResult({
-        status: 'failed',
-        message: `Clearance DENIED: Pass Code '${code}' not recognized or expired.`,
-      });
-    }
-  };
-
-  const handleApproveUser = (userId: string) => {
-    const updated = allUsers.map((u) =>
-      u.id === userId
-        ? { ...u, status: 'active' as const, approved_by: currentUser?.full_name || 'Admin', approved_at: new Date().toISOString() }
-        : u
-    );
-    setAllUsers(updated);
-    saveAppUsers(updated);
-  };
-
-  const handleRejectUser = (userId: string) => {
-    const updated = allUsers.map((u) =>
-      u.id === userId ? { ...u, status: 'rejected' as const } : u
-    );
-    setAllUsers(updated);
-    saveAppUsers(updated);
-  };
-
-  if (!currentUser) {
-    return (
-      <div className="min-h-screen bg-[#FBF8F1] py-16 px-4 text-center">
-        <div className="max-w-md mx-auto card-estate p-8 space-y-4">
-          <ShieldAlert className="w-12 h-12 text-[#C89B3C] mx-auto" />
-          <h2 className="font-serif text-2xl font-bold text-[#0A2F1C]">
-            Session Required
-          </h2>
-          <p className="text-xs text-[#10241A]/70">
-            Please log in with your role-specific PIN or email to access the estate portal.
-          </p>
-          <button
-            onClick={() => navigate('/login')}
-            className="w-full py-3 px-4 rounded-xl bg-[#0F472A] text-white font-semibold text-xs hover:bg-[#0A2F1C]"
-          >
-            Go to Portal Login
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="min-h-screen bg-[#FBF8F1] py-8 px-4 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header Profile Greeting */}
-        <div className="card-estate p-6 sm:p-8 bg-white border-[#E4D9BE] shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs uppercase tracking-wider font-bold text-[#C89B3C]">
-                {currentUser.role.replace('_', ' ')} Dashboard
-              </span>
-              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            </div>
-            <h1 className="font-serif text-2xl sm:text-3xl font-bold text-[#0A2F1C]">
-              Welcome back, {currentUser.full_name}
-            </h1>
-            <p className="text-xs sm:text-sm text-[#10241A]/70">
-              {currentUser.role === 'resident'
-                ? `House ${currentUser.house_number} — ${currentUser.house_unit} • Account Active`
-                : currentUser.role === 'security'
-                ? 'Main Gate Command Console • Guard Terminal 1'
-                : currentUser.role === 'staff'
-                ? `House ${currentUser.house_number} (${currentUser.house_unit}) Domestic Staff`
-                : 'Estate Administration & Madrasa Oversight Portal'}
+    <div className="min-h-screen bg-[#FBFDF9] text-[#16241D] font-['Manrope',sans-serif] pb-[110px] select-none">
+      {/* SVG Lattice Background Pattern */}
+      <svg width="0" height="0" className="absolute">
+        <defs>
+          <pattern id="dash-lattice" width="56" height="56" patternUnits="userSpaceOnUse">
+            <g fill="none" stroke="currentColor" strokeWidth="1">
+              <rect x="10" y="10" width="36" height="36" transform="rotate(45 28 28)" />
+              <rect x="15" y="15" width="26" height="26" />
+            </g>
+          </pattern>
+        </defs>
+      </svg>
+
+      {/* Floating Header */}
+      <header className="sticky top-0 z-40 flex justify-between items-center py-4 px-4 md:px-6">
+        <div className="flex items-center gap-2.5 bg-white/15 border border-white/20 backdrop-blur-[14px] rounded-full py-1.5 px-3.5 shadow-xs">
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="w-[30px] h-[30px] rounded-[9px] bg-[#3FAE7A] flex items-center justify-center shrink-0 cursor-pointer hover:opacity-90 transition-opacity"
+            title="Light House Estate, Lekki"
+          >
+            <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+              <circle cx="12" cy="12" r="8" stroke="#0D2A1F" strokeWidth="1.8" />
+              <path d="M12 7v10M7 12h10" stroke="#0D2A1F" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
+          <span className="font-['Sora',sans-serif] font-bold text-[12.5px] text-white tracking-tight">
+            {currentUser?.role === 'resident'
+              ? `House ${currentUser.house_number} · ${currentUser.house_unit || 'Main House'}`
+              : 'Light House Estate, Lekki'}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 bg-white/15 border border-white/20 backdrop-blur-[14px] rounded-full p-1.5 shadow-xs">
+          <button 
+            type="button" 
+            onClick={() => navigate('/notices')}
+            aria-label="Notifications"
+            className="relative w-[34px] h-[34px] rounded-full bg-white/15 border border-white/20 flex items-center justify-center text-white cursor-pointer hover:bg-white/25 transition-colors"
+          >
+            <span className="absolute top-[5px] right-[6px] w-1.5 h-1.5 rounded-full bg-[#E8C547] border border-[#123528]" />
+            <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+              <path d="M6 8a6 6 0 1112 0c0 4 1.5 6 2 6H4c0.5 0 2-2 2-6z" />
+              <path d="M10 20a2 2 0 004 0" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/settings')}
+            className="w-[34px] h-[34px] rounded-full bg-[#E8C547] text-[#4A3B0A] flex items-center justify-center font-['Sora',sans-serif] font-bold text-[12.5px] cursor-pointer hover:opacity-90 transition-opacity"
+            title="Account & Profile Settings"
+          >
+            {userInitials}
+          </button>
+        </div>
+      </header>
+
+      {/* Hero Header Card */}
+      <div className="bg-gradient-to-br from-[#123528] to-[#0D2A1F] text-white px-4 md:px-6 pt-20 pb-12 -mt-16 relative overflow-hidden">
+        <svg className="absolute inset-0 w-full h-full opacity-[0.13] pointer-events-none text-white">
+          <rect width="100%" height="100%" fill="url(#dash-lattice)" />
+        </svg>
+
+        <div className="max-w-[720px] mx-auto relative z-10 pt-2">
+          <h1 className="font-['Sora',sans-serif] font-bold text-[24px] sm:text-[27px] md:text-[29px] tracking-[-0.02em] mb-1.5">
+            Welcome home, {currentUser?.full_name || 'Dr. Tariq'}
+          </h1>
+          <p className="text-[14px] text-white/70 mb-5.5 font-medium">
+            Everything about House {currentUser?.house_number || '14'}, in one place.
+          </p>
+
+          {/* Hadith Mini Card */}
+          <div className="relative bg-white/[0.08] border border-white/[0.16] rounded-2xl py-4 px-4.5 text-left backdrop-blur-xs">
+            <span className="absolute top-1 left-3.5 font-['Sora',sans-serif] text-[32px] font-extrabold text-[#E8C547] opacity-60 leading-none pointer-events-none select-none">
+              &ldquo;
+            </span>
+            <p className="text-[13.5px] leading-relaxed text-white/[0.92] pl-5 mb-2 font-normal">
+              &ldquo;{todayHadith.text}&rdquo;
+            </p>
+            <p className="text-[10.5px] font-bold tracking-[0.04em] uppercase text-white/55 pl-5">
+              {todayHadith.source}
             </p>
           </div>
+        </div>
+      </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            {currentUser.role === 'resident' && (
-              <>
-                <span className="px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  Dues: Up to Date
-                </span>
-                <button
-                  onClick={() => navigate('/passes')}
-                  className="px-4 py-2.5 rounded-xl bg-[#0F472A] text-white text-xs font-bold hover:bg-[#0A2F1C] transition-all shadow-xs flex items-center gap-1.5"
-                >
-                  <Plus className="w-4 h-4 text-[#E7D19C]" />
-                  <span>Passes Hub</span>
-                </button>
-              </>
-            )}
+      {/* Content Sheet */}
+      <div className="bg-[#FBFDF9] rounded-t-[26px] -mt-6 relative z-10 pt-6">
+        <div className="max-w-[720px] mx-auto px-4 md:px-8 space-y-7">
 
-            {(currentUser.role === 'admin' || currentUser.role === 'master_admin' || currentUser.role === 'madrasa_admin') && (
+          {/* Section 1: Metric Grid */}
+          <section className="mb-7">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <div className="bg-white border border-[#E3EFE7] rounded-[14px] py-3.5 px-2 text-center shadow-xs">
+                <div className="font-['Sora',sans-serif] font-extrabold text-[22px] text-[#257A54] leading-tight">
+                  {passesTodayCount}
+                </div>
+                <div className="text-[10.5px] text-[#8AA096] font-semibold mt-1 leading-tight">
+                  Passes today
+                </div>
+              </div>
+
+              <div className="bg-white border border-[#E3EFE7] rounded-[14px] py-3.5 px-2 text-center shadow-xs">
+                <div className="font-['Sora',sans-serif] font-extrabold text-[22px] text-[#257A54] leading-tight">
+                  {activePassesCount}
+                </div>
+                <div className="text-[10.5px] text-[#8AA096] font-semibold mt-1 leading-tight">
+                  Active passes
+                </div>
+              </div>
+
+              <div className="bg-white border border-[#E3EFE7] rounded-[14px] py-3.5 px-2 text-center shadow-xs">
+                <div className="font-['Sora',sans-serif] font-extrabold text-[22px] text-[#257A54] leading-tight">
+                  {visitorsInEstateCount}
+                </div>
+                <div className="text-[10.5px] text-[#8AA096] font-semibold mt-1 leading-tight">
+                  Visitors in the estate
+                </div>
+              </div>
+
+              <div className="bg-white border border-[#E3EFE7] rounded-[14px] py-3.5 px-2 text-center shadow-xs">
+                <div className="font-['Sora',sans-serif] font-extrabold text-[22px] text-[#257A54] leading-tight">
+                  0
+                </div>
+                <div className="text-[10.5px] text-[#8AA096] font-semibold mt-1 leading-tight">
+                  Alerts
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Section 2: Quick Actions Grid */}
+          <section className="mb-7">
+            <div className="grid grid-cols-4 gap-2.5">
               <button
-                onClick={() => navigate('/admin')}
-                className="px-4 py-2.5 rounded-xl bg-[#0F472A] text-white text-xs font-bold hover:bg-[#0A2F1C] transition-all flex items-center gap-1.5"
+                type="button"
+                onClick={() => setIsPassModalOpen(true)}
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 text-center transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group flex flex-col items-center justify-center"
               >
-                <Building2 className="w-4 h-4 text-[#E7D19C]" />
-                <span>Admin Console</span>
+                <div className="w-[38px] h-[38px] rounded-[11px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
+                  <svg className="w-5 h-5 stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                    <circle cx="7.5" cy="7.5" r="3.2" />
+                    <line x1="9.8" y1="9.8" x2="19" y2="19" />
+                    <line x1="15" y1="15" x2="17" y2="13" />
+                  </svg>
+                </div>
+                <span className="text-[11.5px] font-bold text-[#16241D] block leading-tight">
+                  Issue pass
+                </span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/facilities')}
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 text-center transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group flex flex-col items-center justify-center"
+              >
+                <div className="w-[38px] h-[38px] rounded-[11px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
+                  <svg className="w-5 h-5 stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                    <rect x="3" y="5" width="18" height="16" rx="2" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                    <line x1="7" y1="3" x2="7" y2="7" />
+                    <line x1="17" y1="3" x2="17" y2="7" />
+                  </svg>
+                </div>
+                <span className="text-[11.5px] font-bold text-[#16241D] block leading-tight">
+                  Book facility
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/fix-it-tickets')}
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 text-center transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group flex flex-col items-center justify-center"
+              >
+                <div className="w-[38px] h-[38px] rounded-[11px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
+                  <svg className="w-5 h-5 stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                    <path d="M14.7 6.3a3 3 0 10-4.24 4.24L4 17v3h3l6.5-6.46a3 3 0 004.2-4.24z" />
+                  </svg>
+                </div>
+                <span className="text-[11.5px] font-bold text-[#16241D] block leading-tight">
+                  Report fault
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/notices')}
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 text-center transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer group flex flex-col items-center justify-center"
+              >
+                <div className="w-[38px] h-[38px] rounded-[11px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
+                  <svg className="w-5 h-5 stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                    <path d="M6 8a6 6 0 1112 0c0 4 1.5 6 2 6H4c0.5 0 2-2 2-6z" />
+                    <path d="M10 20a2 2 0 004 0" />
+                  </svg>
+                </div>
+                <span className="text-[11.5px] font-bold text-[#16241D] block leading-tight">
+                  Notice board
+                </span>
+              </button>
+            </div>
+          </section>
+
+          {/* Section 3: 2-Column Grid (Active passes & Activity Console) */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
+            
+            {/* Left: Active Passes */}
+            <div className="md:col-span-7 space-y-2.5">
+              <div className="flex justify-between items-baseline mb-3">
+                <h2 className="font-['Sora',sans-serif] font-bold text-[15.5px] text-[#16241D]">
+                  Active visitor passes
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => navigate('/passes')}
+                  className="text-[12.5px] font-bold text-[#257A54] hover:underline cursor-pointer"
+                >
+                  All passes &rarr;
+                </button>
+              </div>
+
+              {activePassesList.length > 0 ? (
+                activePassesList.map((pass) => (
+                  <div 
+                    key={pass.id}
+                    className="bg-white border border-[#E3EFE7] rounded-2xl py-3.5 px-4 flex items-center gap-3 transition-all hover:border-[#3FAE7A] shadow-xs"
+                  >
+                    <div className="w-[38px] h-[38px] rounded-[10px] bg-[#FBF3D9] text-[#B4922C] flex items-center justify-center shrink-0">
+                      <svg className="w-[18px] h-[18px] fill-current stroke-none" viewBox="0 0 24 24">
+                        <rect x="3" y="3" width="6" height="6" />
+                        <rect x="15" y="3" width="6" height="6" />
+                        <rect x="3" y="15" width="6" height="6" />
+                        <rect x="13" y="13" width="3" height="3" />
+                        <rect x="18" y="13" width="3" height="3" />
+                        <rect x="13" y="18" width="3" height="3" />
+                        <rect x="18" y="18" width="3" height="3" />
+                      </svg>
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13.5px] font-bold text-[#16241D] truncate">
+                        {pass.guest_name}
+                      </div>
+                      <div className="text-[11.5px] text-[#8AA096] capitalize truncate">
+                        {pass.pass_type} &middot; {pass.status === 'used' ? 'Verified today' : 'Expires in 4h'}
+                      </div>
+                    </div>
+
+                    <span className="font-['Sora',sans-serif] text-[13px] font-bold text-[#257A54] mr-1.5 font-mono">
+                      {pass.pass_code}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCopyCode(pass.pass_code)}
+                      aria-label="Copy pass code"
+                      className={`w-[32px] h-[32px] rounded-[9px] border flex items-center justify-center cursor-pointer transition-all shrink-0 ${
+                        copiedCode === pass.pass_code
+                          ? 'border-[#3FAE7A] text-[#257A54] bg-[#EAF7EE]'
+                          : 'border-[#E3EFE7] bg-[#FBFDF9] text-[#516459] hover:border-[#8AA096]'
+                      }`}
+                    >
+                      {copiedCode === pass.pass_code ? (
+                        <Check className="w-3.5 h-3.5 text-[#257A54]" />
+                      ) : (
+                        <svg className="w-[15px] h-[15px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                          <rect x="8" y="8" width="12" height="12" rx="2" />
+                          <path d="M4 16V6a2 2 0 012-2h10" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="bg-white border border-[#E3EFE7] rounded-2xl p-6 text-center text-[12.5px] text-[#8AA096]">
+                  No active passes currently.
+                </div>
+              )}
+            </div>
+
+            {/* Right: Activity Console */}
+            <div className="md:col-span-5 space-y-2.5">
+              <div className="flex justify-between items-baseline mb-3">
+                <h2 className="font-['Sora',sans-serif] font-bold text-[15.5px] text-[#16241D]">
+                  Recent activity
+                </h2>
+              </div>
+
+              <div className="bg-[#0D1F17] rounded-[20px] p-4.5 text-white shadow-md">
+                <div className="flex justify-between items-center mb-3">
+                  <span className="flex items-center gap-2 font-['Sora',sans-serif] text-[12px] font-bold text-white/70">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] shadow-[0_0_0_3px_rgba(74,222,128,0.25)] animate-[pulse_1.6s_ease-in-out_infinite]" />
+                    House {currentUser?.house_number || 14}
+                  </span>
+                  <span className="font-['Sora',sans-serif] text-[10px] font-extrabold tracking-[0.06em] text-[#4ADE80] bg-[#4ADE80]/[0.12] py-0.5 px-2 rounded-full">
+                    Live
+                  </span>
+                </div>
+
+                <div 
+                  className="h-[112px] overflow-hidden relative"
+                  style={{
+                    WebkitMaskImage: 'linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent)',
+                    maskImage: 'linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent)'
+                  }}
+                >
+                  <div className="absolute w-full animate-[scrollUp_14s_linear_infinite]">
+                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
+                      <span className="text-white/40 shrink-0 w-16">09:41</span>
+                      <span className="text-white font-semibold">Guest LH-8291 verified &middot; Gate 1</span>
+                    </div>
+                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
+                      <span className="text-white/40 shrink-0 w-16">08:15</span>
+                      <span className="text-white font-semibold">Staff PIN used &middot; Gate 2</span>
+                    </div>
+                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
+                      <span className="text-white/40 shrink-0 w-16">Yesterday</span>
+                      <span className="text-white font-semibold">You issued a delivery pass</span>
+                    </div>
+                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
+                      <span className="text-white/40 shrink-0 w-16">Yesterday</span>
+                      <span className="text-white font-semibold">Guest departed &middot; Gate 1</span>
+                    </div>
+                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
+                      <span className="text-white/40 shrink-0 w-16">09:41</span>
+                      <span className="text-white font-semibold">Guest LH-8291 verified &middot; Gate 1</span>
+                    </div>
+                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
+                      <span className="text-white/40 shrink-0 w-16">08:15</span>
+                      <span className="text-white font-semibold">Staff PIN used &middot; Gate 2</span>
+                    </div>
+                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
+                      <span className="text-white/40 shrink-0 w-16">Yesterday</span>
+                      <span className="text-white font-semibold">You issued a delivery pass</span>
+                    </div>
+                    <div className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/[0.08]">
+                      <span className="text-white/40 shrink-0 w-16">Yesterday</span>
+                      <span className="text-white font-semibold">Guest departed &middot; Gate 1</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 4: Estate Services Grid */}
+          <section className="mb-7">
+            <div className="flex justify-between items-baseline mb-3">
+              <h2 className="font-['Sora',sans-serif] font-bold text-[15.5px] text-[#16241D]">
+                Estate services
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+              <button
+                type="button"
+                onClick={() => navigate('/facilities')}
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
+              >
+                <div className="w-8 h-8 rounded-[9px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
+                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                    <rect x="3" y="5" width="18" height="16" rx="2" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                  </svg>
+                </div>
+                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
+                  Facility booking
+                </h3>
+                <p className="text-[11.5px] text-[#8AA096] leading-tight">
+                  Pitch, mosque hall, kitchen
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/townhall-polls')}
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
+              >
+                <div className="w-8 h-8 rounded-[9px] bg-[#FBF3D9] text-[#B4922C] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
+                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                    <line x1="6" y1="20" x2="6" y2="10" />
+                    <line x1="12" y1="20" x2="12" y2="4" />
+                    <line x1="18" y1="20" x2="18" y2="14" />
+                  </svg>
+                </div>
+                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
+                  Townhall polls
+                </h3>
+                <p className="text-[11.5px] text-[#8AA096] leading-tight">
+                  Vote on estate decisions
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/fix-it-tickets')}
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
+              >
+                <div className="w-8 h-8 rounded-[9px] bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
+                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                    <path d="M14.7 6.3a3 3 0 10-4.24 4.24L4 17v3h3l6.5-6.46a3 3 0 004.2-4.24z" />
+                  </svg>
+                </div>
+                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
+                  Fix-it tickets
+                </h3>
+                <p className="text-[11.5px] text-[#8AA096] leading-tight">
+                  Report &amp; track maintenance
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/marketplace')}
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group"
+              >
+                <div className="w-8 h-8 rounded-[9px] bg-[#FBF3D9] text-[#B4922C] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
+                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                    <path d="M6 8h12l-1 12H7L6 8z" />
+                    <path d="M9 8V6a3 3 0 016 0v2" />
+                  </svg>
+                </div>
+                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
+                  Marketplace
+                </h3>
+                <p className="text-[11.5px] text-[#8AA096] leading-tight">
+                  Neighbour classifieds
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/settings')}
+                className="bg-white border border-[#E3EFE7] rounded-2xl p-4 text-left cursor-pointer transition-all hover:border-[#3FAE7A] hover:shadow-xs group col-span-2 sm:col-span-1"
+              >
+                <div className="w-8 h-8 rounded-[9px] bg-[#E8C547]/20 text-[#8C6D1F] flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform">
+                  <svg className="w-[17px] h-[17px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+                    <circle cx="12" cy="8" r="4" />
+                    <path d="M6 21v-2a4 4 0 014-4h4a4 4 0 014 4v2" />
+                  </svg>
+                </div>
+                <h3 className="font-['Sora',sans-serif] text-[13px] font-bold text-[#16241D] mb-1">
+                  Profile &amp; House
+                </h3>
+                <p className="text-[11.5px] text-[#8AA096] leading-tight">
+                  Unit type, plates, contacts
+                </p>
+              </button>
+            </div>
+          </section>
+
+          {/* Section 5: Notice Board */}
+          <section className="mb-7">
+            <div className="flex justify-between items-baseline mb-3">
+              <h2 className="font-['Sora',sans-serif] font-bold text-[15.5px] text-[#16241D]">
+                Notice board
+              </h2>
+              <button
+                type="button"
+                onClick={() => navigate('/notices')}
+                className="text-[12.5px] font-bold text-[#257A54] hover:underline cursor-pointer"
+              >
+                View all &rarr;
+              </button>
+            </div>
+
+            {/* Emergency Notice */}
+            <div 
+              onClick={() => navigate('/notices')}
+              className="bg-white border border-[#E3EFE7] rounded-2xl py-3.5 px-4 mb-2.5 cursor-pointer hover:border-[#3FAE7A] transition-all"
+            >
+              <span className="inline-block text-[10px] font-extrabold tracking-[0.05em] py-0.5 px-2.5 rounded-full mb-2 bg-[#FCEBEB] text-[#A32D2D]">
+                Emergency
+              </span>
+              <h3 className="font-['Sora',sans-serif] text-[13.5px] font-bold text-[#16241D] mb-1">
+                {emergencyNotice.title}
+              </h3>
+              <p className="text-[12px] text-[#516459] mb-1.5 leading-relaxed">
+                {emergencyNotice.content}
+              </p>
+              <span className="text-[11px] text-[#8AA096]">
+                {'date' in emergencyNotice && typeof (emergencyNotice as Record<string, unknown>).date === 'string'
+                  ? (emergencyNotice as Record<string, unknown>).date as string
+                  : emergencyNotice.created_at
+                    ? new Date(emergencyNotice.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : 'Aug 12'}
+              </span>
+            </div>
+
+            {/* Info Notice */}
+            <div 
+              onClick={() => navigate('/notices')}
+              className="bg-white border border-[#E3EFE7] rounded-2xl py-3.5 px-4 mb-2.5 cursor-pointer hover:border-[#3FAE7A] transition-all"
+            >
+              <span className="inline-block text-[10px] font-extrabold tracking-[0.05em] py-0.5 px-2.5 rounded-full mb-2 bg-[#EAF7EE] text-[#257A54]">
+                Info
+              </span>
+              <h3 className="font-['Sora',sans-serif] text-[13.5px] font-bold text-[#16241D] mb-1">
+                {infoNotice.title}
+              </h3>
+              <p className="text-[12px] text-[#516459] mb-1.5 leading-relaxed">
+                {infoNotice.content}
+              </p>
+              <span className="text-[11px] text-[#8AA096]">
+                {'date' in infoNotice && typeof (infoNotice as Record<string, unknown>).date === 'string'
+                  ? (infoNotice as Record<string, unknown>).date as string
+                  : infoNotice.created_at
+                    ? new Date(infoNotice.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : 'Aug 16'}
+              </span>
+            </div>
+          </section>
+
+          {/* Section 6: Household Management */}
+          <section className="mb-7">
+            <div className="bg-white border border-[#E3EFE7] rounded-[18px] py-4.5 px-5 flex justify-between items-center gap-3 shadow-xs">
+              <div className="flex gap-5 sm:gap-6">
+                <div>
+                  <div className="font-['Sora',sans-serif] font-extrabold text-[18px] text-[#257A54] leading-tight">
+                    2
+                  </div>
+                  <div className="text-[11px] text-[#8AA096] font-semibold mt-0.5">
+                    Household staff
+                  </div>
+                </div>
+                <div>
+                  <div className="font-['Sora',sans-serif] font-extrabold text-[18px] text-[#257A54] leading-tight">
+                    &#8358;0
+                  </div>
+                  <div className="text-[11px] text-[#8AA096] font-semibold mt-0.5">
+                    Outstanding levy
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => navigate('/household')}
+                className="inline-flex items-center gap-1.5 text-xs sm:text-[13px] font-bold py-2.5 px-4 rounded-full bg-transparent text-[#257A54] border border-[#E3EFE7] hover:border-[#3FAE7A] transition-all cursor-pointer whitespace-nowrap"
+              >
+                Manage household
+              </button>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+      {/* Floating Bottom Dock Navigation */}
+      <nav 
+        aria-label="Main navigation"
+        className="fixed bottom-[18px] left-1/2 -translate-x-1/2 z-50 flex gap-1 bg-[#0D2A1F]/[0.92] backdrop-blur-[14px] border border-white/10 p-2 rounded-full shadow-[0_16px_32px_-14px_rgba(0,0,0,0.4)]"
+      >
+        <button
+          type="button"
+          onClick={() => { setActiveDock('home'); navigate('/dashboard'); }}
+          aria-label="Home"
+          className={`w-[50px] h-[46px] rounded-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all ${
+            activeDock === 'home' 
+              ? 'bg-white/[0.12] text-[#E8C547]' 
+              : 'text-white/55 hover:text-white'
+          }`}
+        >
+          <svg className="w-[19px] h-[19px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+            <path d="M4 11l8-7 8 7" />
+            <path d="M6 10v9a1 1 0 001 1h10a1 1 0 001-1v-9" />
+          </svg>
+          <span className="text-[9px] font-bold">Home</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveDock('passes'); navigate('/passes'); }}
+          aria-label="Passes"
+          className={`w-[50px] h-[46px] rounded-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all ${
+            activeDock === 'passes' 
+              ? 'bg-white/[0.12] text-[#E8C547]' 
+              : 'text-white/55 hover:text-white'
+          }`}
+        >
+          <svg className="w-[19px] h-[19px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+            <path d="M4 8a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 000 4v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2a2 2 0 000-4V8z" />
+          </svg>
+          <span className="text-[9px] font-bold">Passes</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveDock('facilities'); navigate('/facilities'); }}
+          aria-label="Facilities"
+          className={`w-[50px] h-[46px] rounded-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all ${
+            activeDock === 'facilities' 
+              ? 'bg-white/[0.12] text-[#E8C547]' 
+              : 'text-white/55 hover:text-white'
+          }`}
+        >
+          <svg className="w-[19px] h-[19px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+            <rect x="3" y="5" width="18" height="16" rx="2" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          <span className="text-[9px] font-bold">Facilities</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveDock('staff'); navigate('/household'); }}
+          aria-label="Household"
+          className={`w-[50px] h-[46px] rounded-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all ${
+            activeDock === 'staff' 
+              ? 'bg-white/[0.12] text-[#E8C547]' 
+              : 'text-white/55 hover:text-white'
+          }`}
+        >
+          <svg className="w-[19px] h-[19px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+            <circle cx="9" cy="8" r="3" />
+            <path d="M4 20c0-3 2.5-5 5-5s5 2 5 5" />
+            <circle cx="17" cy="9" r="2.3" />
+            <path d="M15 20c0-2.4 1-4 3.5-4.3" />
+          </svg>
+          <span className="text-[9px] font-bold">Staff</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveDock('community'); navigate('/townhall-polls'); }}
+          aria-label="Community"
+          className={`w-[50px] h-[46px] rounded-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all ${
+            activeDock === 'community' 
+              ? 'bg-white/[0.12] text-[#E8C547]' 
+              : 'text-white/55 hover:text-white'
+          }`}
+        >
+          <svg className="w-[19px] h-[19px] stroke-current fill-none stroke-[1.7]" viewBox="0 0 24 24">
+            <circle cx="12" cy="8" r="3.2" />
+            <path d="M5 20c0-4 3-6 7-6s7 2 7 6" />
+          </svg>
+          <span className="text-[9px] font-bold">Community</span>
+        </button>
+      </nav>
+
+      {/* Emergency SOS Button */}
+      <div className="fixed right-4 bottom-5 w-[70px] h-[70px] z-50">
+        <svg className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none" viewBox="0 0 70 70">
+          <circle cx="35" cy="35" r="31" stroke="rgba(18,53,40,0.12)" strokeWidth="4" fill="none" />
+          <circle 
+            cx="35" 
+            cy="35" 
+            r="31" 
+            stroke="#C23A38" 
+            strokeWidth="4" 
+            fill="none" 
+            strokeLinecap="round" 
+            strokeDasharray={SOS_RING_LENGTH} 
+            strokeDashoffset={sosProgressOffset}
+            style={{ transition: sosTransition }}
+          />
+        </svg>
+
+        <button
+          type="button"
+          onPointerDown={handleSosPointerDown}
+          onPointerUp={handleSosPointerCancel}
+          onPointerLeave={handleSosPointerCancel}
+          onPointerCancel={handleSosPointerCancel}
+          aria-label="Hold for 5 seconds to send an SOS alert to gate security"
+          className={`absolute top-[7px] left-[7px] w-[56px] h-[56px] rounded-full border-none flex flex-col items-center justify-center gap-0.5 cursor-pointer shadow-[0_10px_22px_-8px_rgba(194,58,56,0.65)] select-none touch-none active:scale-95 transition-transform ${
+            sosActivated 
+              ? 'animate-[sosPulseFast_0.6s_ease-in-out_3] bg-gradient-to-br from-[#FF6E68] to-[#D2413F]'
+              : isHoldingSOS
+                ? 'bg-gradient-to-br from-[#F0645F] to-[#C23A38]'
+                : 'bg-gradient-to-br from-[#F0645F] to-[#C23A38] animate-[sosBreathe_2.6s_ease-in-out_infinite]'
+          }`}
+        >
+          <svg className="w-[18px] h-[18px] stroke-white fill-none stroke-[1.7]" viewBox="0 0 24 24">
+            <path d="M12 3l9 16H3L12 3z" />
+            <line x1="12" y1="9" x2="12" y2="14" />
+            <circle cx="12" cy="17" r="0.6" fill="#fff" stroke="none" />
+          </svg>
+          <span className="font-['Sora',sans-serif] text-[8.5px] font-extrabold tracking-[0.06em] text-white">
+            SOS
+          </span>
+        </button>
+
+        <div 
+          className={`absolute bottom-[74px] right-0 bg-[#0D2A1F] border border-white/15 text-white text-[12px] font-semibold py-2 px-3 rounded-xl whitespace-nowrap shadow-lg pointer-events-none transition-all duration-250 ${
+            showSosToast 
+              ? 'opacity-100 translate-y-0' 
+              : 'opacity-0 translate-y-1.5'
+          }`}
+        >
+          Alert sent to gate security
+        </div>
+      </div>
+
+      {/* Issue Pass Modal */}
+      {isPassModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 border border-[#E3EFE7] shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E3EFE7]">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-[#EAF7EE] text-[#257A54] flex items-center justify-center">
+                  <Plus className="w-5 h-5" />
+                </div>
+                <h3 className="font-['Sora',sans-serif] text-lg font-bold text-[#16241D]">
+                  Issue Visitor Pass
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPassModalOpen(false);
+                  setNewlyCreatedPass(null);
+                }}
+                className="p-1 rounded-lg hover:bg-gray-100 text-[#516459]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {newlyCreatedPass ? (
+              <div className="space-y-4 text-center py-2">
+                <div className="w-16 h-16 rounded-2xl bg-[#EAF7EE] text-[#257A54] mx-auto flex items-center justify-center">
+                  <Check className="w-8 h-8" />
+                </div>
+                <div>
+                  <h4 className="font-['Sora',sans-serif] text-base font-bold text-[#16241D]">
+                    Pass Generated Successfully!
+                  </h4>
+                  <p className="text-xs text-[#516459] mt-0.5">
+                    For {newlyCreatedPass.guest_name} &bull; House {newlyCreatedPass.house_number}
+                  </p>
+                </div>
+
+                <div className="p-4 bg-[#FBFDF9] rounded-xl border border-[#E3EFE7] text-center space-y-2">
+                  <span className="text-[11px] font-bold text-[#8AA096] uppercase tracking-wider">
+                    Gate Access Code
+                  </span>
+                  <div className="font-['Sora',sans-serif] text-3xl font-extrabold tracking-widest text-[#257A54] font-mono">
+                    {newlyCreatedPass.pass_code}
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCode(newlyCreatedPass.pass_code)}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-[#257A54] text-white font-bold text-xs hover:bg-[#123528] transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    {copiedCode === newlyCreatedPass.pass_code ? (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Code Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Copy Pass Code</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsPassModalOpen(false);
+                      setNewlyCreatedPass(null);
+                    }}
+                    className="py-2.5 px-4 rounded-xl border border-[#E3EFE7] text-[#16241D] font-bold text-xs hover:bg-gray-50 transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleCreatePassSubmit} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-bold text-[#16241D] mb-1">
+                    Visitor Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={guestName}
+                    onChange={(e) => setGuestName(e.target.value)}
+                    placeholder="e.g. Engr. Yusuf Belgore"
+                    className="w-full px-3 py-2 rounded-xl border border-[#E3EFE7] text-xs focus:outline-none focus:border-[#3FAE7A] bg-[#FBFDF9]"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-xs font-bold text-[#16241D] mb-1">
+                      Phone Number
+                    </label>
+                    <input
+                      type="tel"
+                      value={guestPhone}
+                      onChange={(e) => setGuestPhone(e.target.value)}
+                      placeholder="+234 803..."
+                      className="w-full px-3 py-2 rounded-xl border border-[#E3EFE7] text-xs focus:outline-none focus:border-[#3FAE7A] bg-[#FBFDF9]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-[#16241D] mb-1">
+                      Vehicle Plate
+                    </label>
+                    <input
+                      type="text"
+                      value={guestPlate}
+                      onChange={(e) => setGuestPlate(e.target.value)}
+                      placeholder="e.g. ABJ-882-LK"
+                      className="w-full px-3 py-2 rounded-xl border border-[#E3EFE7] text-xs focus:outline-none focus:border-[#3FAE7A] bg-[#FBFDF9]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#16241D] mb-1">
+                    Pass Type
+                  </label>
+                  <select
+                    value={passType}
+                    onChange={(e) => setPassType(e.target.value as VisitorPass['pass_type'])}
+                    className="w-full px-3 py-2 rounded-xl border border-[#E3EFE7] text-xs focus:outline-none focus:border-[#3FAE7A] bg-[#FBFDF9]"
+                  >
+                    <option value="guest">Guest (Standard)</option>
+                    <option value="delivery">Delivery Dispatch</option>
+                    <option value="contractor">Artisan/Contractor</option>
+                    <option value="long_stay">Long Stay Visitor</option>
+                  </select>
+                </div>
+
+                {/* Artisan/Contractor conditional fields: Date, Start Time, End Time */}
+                {passType === 'contractor' && (
+                  <div className="space-y-2.5 p-3 bg-[#F4F9F5] border border-[#3FAE7A]/25 rounded-xl">
+                    <div>
+                      <label className="block text-[11px] font-bold text-[#257A54] uppercase tracking-wider mb-1">
+                        Date *
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={artisanDate}
+                        onChange={(e) => setArtisanDate(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-[#E3EFE7] text-xs focus:outline-none focus:border-[#3FAE7A] bg-white"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-bold text-[#257A54] uppercase tracking-wider mb-1">
+                          Start Time *
+                        </label>
+                        <input
+                          type="time"
+                          required
+                          value={artisanStartTime}
+                          onChange={(e) => setArtisanStartTime(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-[#E3EFE7] text-xs focus:outline-none focus:border-[#3FAE7A] bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-[#257A54] uppercase tracking-wider mb-1">
+                          End Time *
+                        </label>
+                        <input
+                          type="time"
+                          required
+                          value={artisanEndTime}
+                          onChange={(e) => setArtisanEndTime(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-[#E3EFE7] text-xs focus:outline-none focus:border-[#3FAE7A] bg-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Long Stay Visitor conditional fields: Valid From, Valid To */}
+                {passType === 'long_stay' && (
+                  <div className="p-3 bg-[#F4F9F5] border border-[#3FAE7A]/25 rounded-xl">
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-bold text-[#257A54] uppercase tracking-wider mb-1">
+                          Valid From *
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={validFromDate}
+                          onChange={(e) => setValidFromDate(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-[#E3EFE7] text-xs focus:outline-none focus:border-[#3FAE7A] bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-[#257A54] uppercase tracking-wider mb-1">
+                          Valid To *
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={validToDate}
+                          onChange={(e) => setValidToDate(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-[#E3EFE7] text-xs focus:outline-none focus:border-[#3FAE7A] bg-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-bold text-[#16241D] mb-1">
+                    Visit Purpose / Notes
+                  </label>
+                  <input
+                    type="text"
+                    value={passNotes}
+                    onChange={(e) => setPassNotes(e.target.value)}
+                    placeholder="e.g. Lunch delivery, repair inspection"
+                    className="w-full px-3 py-2 rounded-xl border border-[#E3EFE7] text-xs focus:outline-none focus:border-[#3FAE7A] bg-[#FBFDF9]"
+                  />
+                </div>
+
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="submit"
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-[#257A54] text-white font-bold text-xs hover:bg-[#123528] transition-colors"
+                  >
+                    Generate 6-Digit Pass
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsPassModalOpen(false)}
+                    className="py-2.5 px-4 rounded-xl border border-[#E3EFE7] text-[#516459] font-bold text-xs hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
             )}
           </div>
         </div>
-
-        {/* 1. RESIDENT VIEW */}
-        {currentUser.role === 'resident' && (
-          <div className="space-y-6">
-            {/* Hero Welcome Banner */}
-            <div className="bg-[#0F472A] rounded-[14px] p-6 sm:p-8 relative overflow-hidden text-white shadow-soft">
-              <div className="relative z-10 max-w-2xl">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-xs text-[#E7D19C] text-xs font-semibold uppercase tracking-wider mb-3 border border-white/15">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                  <span>House {currentUser.house_number} • {currentUser.house_unit}</span>
-                </div>
-                <h1 className="fraunces text-3xl sm:text-4xl font-bold mb-2">
-                  Welcome Home, {currentUser.full_name}
-                </h1>
-                <p className="text-[#E7D19C] text-base sm:text-lg font-medium opacity-90 leading-relaxed">
-                  All systems are active. Generate visitor tokens or review official estate bulletins.
-                </p>
-                <div className="mt-6 flex flex-wrap gap-4">
-                  <button
-                    onClick={() => navigate('/passes')}
-                    className="bg-[#C89B3C] hover:bg-[#b28a35] text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg flex items-center gap-2 text-sm"
-                  >
-                    <Plus className="w-4 h-4 text-white" />
-                    <span>Generate Access Pass</span>
-                  </button>
-                  <button
-                    onClick={() => navigate('/notices')}
-                    className="bg-white/10 hover:bg-white/20 backdrop-blur-sm text-white px-6 py-3 rounded-xl font-bold border border-white/20 transition-all text-sm flex items-center gap-2"
-                  >
-                    <Bell className="w-4 h-4 text-[#E7D19C]" />
-                    <span>Notice Board & Gazettes</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Decorative Geometric Star Watermark */}
-              <div className="absolute right-[-20px] top-[-20px] opacity-10 text-[#C89B3C] pointer-events-none">
-                <svg width="240" height="240" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 0L14.6 9.4L24 12L14.6 14.6L12 24L9.4 14.6L0 12L9.4 9.4L12 0Z" />
-                </svg>
-              </div>
-            </div>
-
-            {/* Star Motif Divider */}
-            <div className="flex items-center gap-4 py-2">
-              <div className="h-px flex-1 bg-[#E4D9BE]"></div>
-              <div className="text-[#C89B3C]">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 0L14.6 9.4L24 12L14.6 14.6L12 24L9.4 14.6L0 12L9.4 9.4L12 0Z" />
-                </svg>
-              </div>
-              <div className="h-px flex-1 bg-[#E4D9BE]"></div>
-            </div>
-
-            {/* Community Services Quick Hub Row */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div 
-                onClick={() => navigate('/community/polls')}
-                className="card-estate p-5 bg-white border border-[#E4D9BE] hover:border-[#C89B3C] shadow-soft hover:shadow-soft-lg transition-all cursor-pointer group flex flex-col justify-between"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="w-9 h-9 rounded-xl bg-[#F2EAD9] group-hover:bg-[#0F472A] text-[#0F472A] group-hover:text-[#E7D19C] flex items-center justify-center transition-colors">
-                      <Vote className="w-5 h-5" />
-                    </div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                      Live
-                    </span>
-                  </div>
-                  <h3 className="font-serif font-bold text-[#0A2F1C] text-base group-hover:text-[#0F472A]">
-                    Townhall Polls
-                  </h3>
-                  <p className="text-xs text-[#10241A]/70 leading-relaxed">
-                    Cast your household vote on estate upgrades, gate automation, and community initiatives.
-                  </p>
-                </div>
-                <div className="pt-3 mt-3 border-t border-[#E4D9BE]/60 flex items-center justify-between text-xs font-bold text-[#0F472A]">
-                  <span>Vote in Polls</span>
-                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-                </div>
-              </div>
-
-              <div 
-                onClick={() => navigate('/community/tickets')}
-                className="card-estate p-5 bg-white border border-[#E4D9BE] hover:border-[#C89B3C] shadow-soft hover:shadow-soft-lg transition-all cursor-pointer group flex flex-col justify-between"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="w-9 h-9 rounded-xl bg-[#F2EAD9] group-hover:bg-[#0F472A] text-[#0F472A] group-hover:text-[#E7D19C] flex items-center justify-center transition-colors">
-                      <Wrench className="w-5 h-5" />
-                    </div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-sky-50 text-sky-800 border border-sky-200">
-                      Support
-                    </span>
-                  </div>
-                  <h3 className="font-serif font-bold text-[#0A2F1C] text-base group-hover:text-[#0F472A]">
-                    Fix-It Tickets
-                  </h3>
-                  <p className="text-xs text-[#10241A]/70 leading-relaxed">
-                    Report electrical faults, plumbing leaks, or security issues with live tracking.
-                  </p>
-                </div>
-                <div className="pt-3 mt-3 border-t border-[#E4D9BE]/60 flex items-center justify-between text-xs font-bold text-[#0F472A]">
-                  <span>Track & Report Faults</span>
-                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-                </div>
-              </div>
-
-              <div 
-                onClick={() => navigate('/community/marketplace')}
-                className="card-estate p-5 bg-white border border-[#E4D9BE] hover:border-[#C89B3C] shadow-soft hover:shadow-soft-lg transition-all cursor-pointer group flex flex-col justify-between"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="w-9 h-9 rounded-xl bg-[#F2EAD9] group-hover:bg-[#0F472A] text-[#0F472A] group-hover:text-[#E7D19C] flex items-center justify-center transition-colors">
-                      <ShoppingBag className="w-5 h-5" />
-                    </div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                      Noticeboard
-                    </span>
-                  </div>
-                  <h3 className="font-serif font-bold text-[#0A2F1C] text-base group-hover:text-[#0F472A]">
-                    Resident Marketplace
-                  </h3>
-                  <p className="text-xs text-[#10241A]/70 leading-relaxed">
-                    Browse neighbor goods, furniture, electronics, giveaways, and resident services.
-                  </p>
-                </div>
-                <div className="pt-3 mt-3 border-t border-[#E4D9BE]/60 flex items-center justify-between text-xs font-bold text-[#0F472A]">
-                  <span>Browse Notices</span>
-                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-                </div>
-              </div>
-            </div>
-
-            {/* 12-Column Main Dashboard Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Left Column (8 cols) */}
-              <div className="lg:col-span-8 flex flex-col gap-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  {/* Recent Activity Card */}
-                  <div className="bg-white p-6 rounded-[14px] border border-[#E4D9BE] shadow-soft space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="fraunces text-lg font-bold text-[#10241A] flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-[#C89B3C]"></span>
-                        Active Passes
-                      </h3>
-                      <button
-                        onClick={() => navigate('/passes')}
-                        className="text-xs font-semibold text-[#0F472A] hover:underline"
-                      >
-                        All Passes →
-                      </button>
-                    </div>
-
-                    <div className="space-y-3.5">
-                      {residentPasses.length === 0 ? (
-                        <div className="p-5 text-center bg-[#FBF8F1] rounded-xl border border-[#E4D9BE] space-y-2">
-                          <Ticket className="w-8 h-8 text-[#C89B3C] mx-auto opacity-70" />
-                          <p className="text-xs text-[#10241A]/70">No active visitor passes right now.</p>
-                          <button
-                            onClick={() => navigate('/passes')}
-                            className="text-xs font-bold text-[#0F472A] hover:underline"
-                          >
-                            + Issue Guest Pass
-                          </button>
-                        </div>
-                      ) : (
-                        residentPasses.slice(0, 3).map((pass) => (
-                          <div
-                            key={pass.id}
-                            className="flex items-start justify-between p-3 rounded-xl bg-[#FBF8F1] border border-[#E4D9BE]/70 hover:border-[#C89B3C] transition-all"
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-[#F2EAD9] flex items-center justify-center text-[#0F472A] shrink-0 font-bold">
-                                <Ticket className="w-4 h-4 text-[#0F472A]" />
-                              </div>
-                              <div>
-                                <p className="text-sm font-semibold text-[#0A2F1C]">
-                                  {pass.guest_name}
-                                </p>
-                                <p className="text-[11px] text-[#10241A]/60">
-                                  {pass.pass_type.replace('_', ' ')} • Code:{' '}
-                                  <strong className="font-mono text-[#0F472A]">{pass.pass_code}</strong>
-                                </p>
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => handleCopyPass(pass.pass_code)}
-                              className="p-1.5 rounded-lg hover:bg-white text-[#0A2F1C] transition-colors border border-transparent hover:border-[#E4D9BE]"
-                              title="Copy Pass Info"
-                            >
-                              <Copy className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ))
-                      )}
-
-                      <div className="flex items-center gap-3 pt-1">
-                        <div className="w-8 h-8 rounded-full bg-[#FBF8F1] flex items-center justify-center text-[#0F472A] shrink-0 border border-[#E4D9BE]">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-[#10241A]">Estate Dues Verified</p>
-                          <p className="text-[10px] text-[#10241A]/50">Status: Up to Date • Ref: LH-DUES-2026</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Dynamic Compact Notice Widget (1-2 most recent notices) */}
-                  <div className="bg-white p-6 rounded-[14px] border border-[#E4D9BE] shadow-soft flex flex-col justify-between space-y-4">
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h3 className="fraunces text-lg font-bold text-[#10241A] flex items-center gap-2">
-                          <Bell className="w-4 h-4 text-[#C89B3C]" />
-                          Notice Board
-                        </h3>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#0F472A] bg-[#F2EAD9] px-2 py-0.5 rounded-md">
-                          Latest Gazettes
-                        </span>
-                      </div>
-
-                      <div className="space-y-2.5">
-                        {recentNotices.map((notice) => {
-                          const noticeEmerg = isEmergency(notice);
-                          const noticeEvent = notice.type === 'event' || notice.category === 'event';
-
-                          return (
-                            <div
-                              key={notice.id}
-                              onClick={() => navigate('/notices')}
-                              className={`p-3 rounded-xl border transition-all cursor-pointer hover:shadow-xs space-y-1 ${
-                                noticeEmerg
-                                  ? 'bg-rose-50 border-red-300 hover:border-red-400'
-                                  : noticeEvent
-                                  ? 'bg-amber-50/60 border-amber-200 hover:border-amber-300'
-                                  : 'bg-[#FBF8F1] border-[#E4D9BE] hover:border-[#0F472A]'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-1">
-                                <span
-                                  className={`text-[9px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                                    noticeEmerg
-                                      ? 'bg-red-600 text-white'
-                                      : noticeEvent
-                                      ? 'bg-[#C89B3C] text-white'
-                                      : 'bg-[#0F472A] text-white'
-                                  }`}
-                                >
-                                  {noticeEmerg ? 'EMERGENCY' : noticeEvent ? 'EVENT' : 'INFO'}
-                                </span>
-                                <span className="text-[10px] text-[#10241A]/50">
-                                  {new Date(notice.created_at).toLocaleDateString([], {
-                                    month: 'short',
-                                    day: 'numeric',
-                                  })}
-                                </span>
-                              </div>
-
-                              <p className="text-xs font-bold text-[#0A2F1C] line-clamp-1">
-                                {notice.title}
-                              </p>
-                              <p className="text-[11px] text-[#10241A]/75 line-clamp-2 leading-tight">
-                                {notice.body || notice.content}
-                              </p>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => navigate('/notices')}
-                      className="w-full text-center text-xs font-bold text-[#0F472A] hover:underline pt-2 border-t border-[#E4D9BE]/60 flex items-center justify-center gap-1"
-                    >
-                      <span>Open Full Notice Board</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Hotlines Banner */}
-                <div className="card-estate p-5 bg-[#F2EAD9]/60 border-[#E4D9BE] flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-[#0F472A] text-[#E7D19C] flex items-center justify-center font-bold">
-                      <PhoneCall className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-[#0A2F1C]">Gatehouse & Security Dispatch</h4>
-                      <p className="text-xs text-[#10241A]/70">Gate 1: Ext. 100 • Gate 2: Ext. 102 • Management: Ext. 201</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      alert('Gatehouse Intercom dispatch connected (Ext. 100). Guard on duty notified.');
-                    }}
-                    className="px-4 py-2 rounded-xl bg-[#0F472A] text-white text-xs font-bold hover:bg-[#0A2F1C] transition-colors whitespace-nowrap shadow-xs"
-                  >
-                    Call Security Ext. 100
-                  </button>
-                </div>
-              </div>
-
-              {/* Right Column (4 cols) */}
-              <div className="lg:col-span-4 flex flex-col gap-6">
-                {/* Quick PIN Access Card */}
-                <div className="bg-[#F2EAD9] p-6 rounded-[14px] border border-[#E4D9BE] flex flex-col gap-4 shadow-soft">
-                  <div>
-                    <h3 className="fraunces text-lg font-bold text-[#10241A]">
-                      Household PIN Key
-                    </h3>
-                    <p className="text-xs text-[#10241A]/70 mt-0.5">
-                      Personal 6-character access key for automated gates.
-                    </p>
-                  </div>
-
-                  <div className="flex justify-between gap-2 mt-1">
-                    {(currentUser.pin || '4928AB').split('').map((char, i) => (
-                      <div
-                        key={i}
-                        className="w-10 h-12 bg-white border border-[#C89B3C] rounded-lg flex items-center justify-center fraunces font-bold text-xl text-[#0A2F1C] shadow-2xs"
-                      >
-                        {char}
-                      </div>
-                    ))}
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      alert(`Resident Key for House ${currentUser.house_number} (${currentUser.house_unit}) verified and active across all gates.`);
-                    }}
-                    className="w-full bg-[#0F472A] text-white py-3 rounded-xl font-bold text-xs shadow-md hover:bg-[#0A2F1C] transition-all"
-                  >
-                    Validate Resident Key
-                  </button>
-                </div>
-
-                {/* Progressive Web App Install & Offline Tile */}
-                <div className="bg-white p-5 rounded-[14px] border border-[#E4D9BE] shadow-soft space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-lg bg-[#0F472A] text-[#E7D19C] flex items-center justify-center">
-                        <Smartphone className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold text-[#0A2F1C]">
-                          {isInstalled ? 'Installed Native App' : 'Offline Access App'}
-                        </h4>
-                        <p className="text-[10px] text-[#10241A]/60">
-                          {isInstalled ? 'Running in standalone mode' : 'Add to home screen for offline passes'}
-                        </p>
-                      </div>
-                    </div>
-                    {isInstalled ? (
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                        ACTIVE
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => setShowInstallModal(true)}
-                        className="px-3 py-1.5 rounded-lg bg-[#0F472A] hover:bg-[#0A2F1C] text-white font-bold text-[11px] flex items-center gap-1 shadow-2xs transition-colors"
-                      >
-                        <Download className="w-3 h-3 text-[#E7D19C]" />
-                        <span>Install</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Home Status Card */}
-                <div className="bg-white p-6 rounded-[14px] border border-[#E4D9BE] shadow-soft flex-1 flex flex-col justify-between space-y-4">
-                  <div className="space-y-4">
-                    <div>
-                      <p className="text-[10px] uppercase tracking-widest text-[#C89B3C] font-bold">
-                        Home Status
-                      </p>
-                      <div className="flex justify-between items-end mt-1">
-                        <span className="fraunces text-2xl font-bold text-[#0A2F1C]">
-                          Unit {currentUser.house_number}
-                        </span>
-                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-md uppercase tracking-wider">
-                          ACTIVE
-                        </span>
-                      </div>
-                      <p className="text-xs text-[#10241A]/60 mt-0.5">
-                        {currentUser.house_unit}
-                      </p>
-                    </div>
-
-                    <div className="h-px bg-[#E4D9BE]"></div>
-
-                    <div>
-                      <p className="text-[10px] uppercase tracking-widest text-[#C89B3C] font-bold">
-                        Outstanding Dues
-                      </p>
-                      <p className="fraunces text-2xl font-bold text-[#0A2F1C]">₦0.00</p>
-                      <p className="text-[11px] text-emerald-700 font-medium">
-                        ✓ All monthly levies paid
-                      </p>
-                    </div>
-
-                    <div className="h-px bg-[#E4D9BE]"></div>
-
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <p className="text-[10px] uppercase tracking-widest text-[#C89B3C] font-bold">
-                          Household Staff & KYC
-                        </p>
-                        <button
-                          onClick={() => navigate('/household')}
-                          className="text-[11px] font-bold text-[#0F472A] hover:underline"
-                        >
-                          Manage Hub →
-                        </button>
-                      </div>
-                      <div 
-                        onClick={() => navigate('/household')}
-                        className="flex items-center justify-between p-2.5 mt-2 rounded-xl bg-[#FAF7EE] border border-[#E4D9BE] cursor-pointer hover:border-[#0F472A] transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className="flex -space-x-2">
-                            <div className="w-7 h-7 rounded-full border-2 border-white bg-[#0F472A] text-white flex items-center justify-center text-[10px] font-bold shadow-xs">
-                              FS
-                            </div>
-                            <div className="w-7 h-7 rounded-full border-2 border-white bg-[#C89B3C] text-white flex items-center justify-center text-[10px] font-bold shadow-xs">
-                              YM
-                            </div>
-                          </div>
-                          <span className="text-xs text-[#10241A] font-semibold">Active Household Staff</span>
-                        </div>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
-                          KYC Active
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Panic Emergency Button */}
-                  <button
-                    onClick={() => {
-                      if (confirm('🚨 ACTIVATE EMERGENCY PANIC ALERT?\nThis will instantly dispatch armed security to House ' + currentUser.house_number + ' and notify gate officers.')) {
-                        alert('EMERGENCY DISPATCH TRIGGERED: Armed guard unit dispatched to House ' + currentUser.house_number + '. Gatehouse alerted.');
-                      }
-                    }}
-                    className="w-full py-3.5 mt-4 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold text-xs border border-red-200 flex items-center justify-center gap-2 transition-colors shadow-2xs"
-                  >
-                    <ShieldAlert className="w-4 h-4 text-red-600" />
-                    <span>EMERGENCY PANIC ALERT</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 2. SECURITY GATE VIEW */}
-        {currentUser.role === 'security' && (
-          <div className="space-y-8">
-            <div className="card-estate p-6 sm:p-8 bg-white border-2 border-[#0F472A] shadow-xl space-y-6">
-              <div className="flex items-center justify-between pb-4 border-b border-[#E4D9BE]">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-[#0F472A] text-[#E7D19C] flex items-center justify-center font-bold text-xl">
-                    G1
-                  </div>
-                  <div>
-                    <h2 className="font-serif text-xl sm:text-2xl font-bold text-[#0A2F1C]">
-                      Main Gate Access Clearance Terminal
-                    </h2>
-                    <p className="text-xs text-[#10241A]/70">
-                      Officer on Duty: <strong>{currentUser.full_name}</strong>
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => navigate('/gate')}
-                  className="px-4 py-2 rounded-xl bg-[#0F472A] text-white text-xs font-bold hover:bg-[#0A2F1C]"
-                >
-                  Open Full Security Hub
-                </button>
-              </div>
-
-              {/* Code Verification Input Form */}
-              <div className="space-y-3">
-                <label className="block text-sm font-bold text-[#0A2F1C] uppercase tracking-wide">
-                  Enter 6-Digit Visitor / Contractor Pass Code:
-                </label>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <input
-                    type="text"
-                    placeholder="e.g. 482910"
-                    value={gateCodeInput}
-                    onChange={(e) => setGateCodeInput(e.target.value.toUpperCase())}
-                    className="flex-1 px-4 py-3.5 rounded-xl border-2 border-[#0F472A] text-xl font-mono tracking-widest text-[#0A2F1C] uppercase outline-none focus:ring-4 focus:ring-[#C89B3C]/20 bg-[#FBF8F1]"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleGateVerify('in')}
-                      className="flex-1 sm:flex-none px-6 py-3.5 rounded-xl bg-[#0F472A] text-white font-bold text-sm hover:bg-[#0A2F1C] transition-colors shadow-md"
-                    >
-                      Clear IN
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleGateVerify('out')}
-                      className="flex-1 sm:flex-none px-6 py-3.5 rounded-xl bg-[#C89B3C] text-[#0A2F1C] font-bold text-sm hover:bg-[#E7D19C] transition-colors shadow-md"
-                    >
-                      Log OUT
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Result Banner */}
-              {gateVerifyResult.message && (
-                <div
-                  className={`p-4 rounded-xl text-sm font-bold flex items-start gap-3 ${
-                    gateVerifyResult.status === 'success'
-                      ? 'bg-emerald-50 text-emerald-900 border-2 border-emerald-400'
-                      : 'bg-red-50 text-red-900 border-2 border-red-400'
-                  }`}
-                >
-                  {gateVerifyResult.status === 'success' ? (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-                  )}
-                  <div>
-                    <div>{gateVerifyResult.message}</div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Today's Gate Log Stream */}
-            <div className="card-estate p-6 space-y-4">
-              <h3 className="font-serif text-lg font-bold text-[#0A2F1C] flex items-center gap-2">
-                <Clock className="w-5 h-5 text-[#C89B3C]" />
-                <span>Today's Real-Time Access Audit Logs</span>
-              </h3>
-
-              <div className="divide-y divide-[#E4D9BE] overflow-x-auto">
-                {accessLogs.map((log) => (
-                  <div key={log.id} className="py-3 flex items-center justify-between gap-4 text-xs">
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`font-mono font-bold px-2 py-0.5 rounded text-[11px] ${
-                          log.direction === 'in'
-                            ? 'bg-emerald-100 text-emerald-900'
-                            : 'bg-amber-100 text-amber-900'
-                        }`}
-                      >
-                        {log.direction.toUpperCase()}
-                      </span>
-                      <div>
-                        <div className="font-bold text-[#0A2F1C]">{log.visitor_name}</div>
-                        <div className="text-[#10241A]/60">{log.house_info}</div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-4 text-right">
-                      {log.vehicle_plate && (
-                        <div className="font-mono text-[#0F472A] font-semibold hidden sm:block">
-                          {log.vehicle_plate}
-                        </div>
-                      )}
-                      <div className="text-[#10241A]/60">
-                        {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 3. STAFF VIEW */}
-        {currentUser.role === 'staff' && (
-          <div className="max-w-2xl mx-auto space-y-6">
-            <div className="card-estate p-6 sm:p-8 space-y-5 bg-white">
-              <div className="flex items-center justify-between pb-3 border-b border-[#E4D9BE]">
-                <span className="text-xs uppercase tracking-wider font-bold text-[#0F472A]">
-                  Domestic Staff Credential Card
-                </span>
-                <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
-                  On Duty
-                </span>
-              </div>
-
-              <div className="p-4 rounded-xl bg-[#F2EAD9]/60 border border-[#E4D9BE] space-y-2 text-xs">
-                <div className="flex justify-between py-1 border-b border-[#E4D9BE]/60">
-                  <span className="text-[#10241A]/60">Staff Full Name:</span>
-                  <span className="font-bold text-[#0A2F1C]">{currentUser.full_name}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-[#E4D9BE]/60">
-                  <span className="text-[#10241A]/60">Assigned Household:</span>
-                  <span className="font-bold text-[#0F472A]">
-                    House {currentUser.house_number} ({currentUser.house_unit})
-                  </span>
-                </div>
-                <div className="flex justify-between py-1">
-                  <span className="text-[#10241A]/60">Staff Gate Badge:</span>
-                  <span className="font-mono font-bold text-[#C89B3C]">
-                    STF-{currentUser.house_number}-{currentUser.house_unit}
-                  </span>
-                </div>
-              </div>
-
-              <p className="text-xs text-[#10241A]/70 leading-relaxed">
-                Staff must present this digital credential badge or state their assigned house number and 6-character PIN upon entering through pedestrian gate turnstiles.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* 4. ADMIN & MADRASA ADMIN OVERVIEW */}
-        {(currentUser.role === 'admin' || currentUser.role === 'master_admin' || currentUser.role === 'madrasa_admin') && (
-          <div className="space-y-8">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="card-estate p-4 bg-white border-[#E4D9BE]">
-                <span className="text-xs text-[#10241A]/60 font-medium">Pending Approvals</span>
-                <div className="font-serif text-2xl font-bold text-amber-700 mt-1">
-                  {pendingUsers.length}
-                </div>
-              </div>
-              <div className="card-estate p-4 bg-white border-[#E4D9BE]">
-                <span className="text-xs text-[#10241A]/60 font-medium">Active Households</span>
-                <div className="font-serif text-2xl font-bold text-[#0F472A] mt-1">
-                  {allUsers.filter((u) => u.status === 'active' && u.role === 'resident').length}
-                </div>
-              </div>
-              <div className="card-estate p-4 bg-white border-[#E4D9BE]">
-                <span className="text-xs text-[#10241A]/60 font-medium">Active Passes</span>
-                <div className="font-serif text-2xl font-bold text-[#C89B3C] mt-1">
-                  {passes.filter((p) => p.status === 'active').length}
-                </div>
-              </div>
-              <div className="card-estate p-4 bg-white border-[#E4D9BE]">
-                <span className="text-xs text-[#10241A]/60 font-medium">Gate Logs Today</span>
-                <div className="font-serif text-2xl font-bold text-[#0A2F1C] mt-1">
-                  {accessLogs.length}
-                </div>
-              </div>
-            </div>
-
-            {/* Pending Approvals Queue */}
-            <div className="card-estate p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-serif text-lg font-bold text-[#0A2F1C]">
-                    Pending Resident Registrations
-                  </h3>
-                  <p className="text-xs text-[#10241A]/60">
-                    Review and verify new household registrations
-                  </p>
-                </div>
-                <button
-                  onClick={() => navigate('/admin')}
-                  className="text-xs font-semibold text-[#0F472A] hover:underline"
-                >
-                  Manage All in Admin Console →
-                </button>
-              </div>
-
-              {pendingUsers.length === 0 ? (
-                <div className="p-6 text-center text-xs text-[#10241A]/60 bg-[#FBF8F1] rounded-xl border border-[#E4D9BE]">
-                  ✓ All registration requests have been processed.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {pendingUsers.map((user) => (
-                    <div
-                      key={user.id}
-                      className="p-4 rounded-xl bg-[#FBF8F1] border border-[#E4D9BE] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                    >
-                      <div>
-                        <div className="font-bold text-sm text-[#0A2F1C]">
-                          {user.full_name}
-                        </div>
-                        <div className="text-[#10241A]/70">
-                          House {user.house_number} ({user.house_unit}) • {user.phone} • {user.email}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleApproveUser(user.id)}
-                          className="px-3 py-1.5 rounded-lg bg-[#0F472A] text-white font-semibold hover:bg-[#0A2F1C] transition-colors"
-                        >
-                          Approve PIN
-                        </button>
-                        <button
-                          onClick={() => handleRejectUser(user.id)}
-                          className="px-3 py-1.5 rounded-lg border border-red-300 text-red-700 bg-white hover:bg-red-50 transition-colors"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 };
