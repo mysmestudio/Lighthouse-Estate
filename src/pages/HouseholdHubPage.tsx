@@ -57,7 +57,7 @@ const SOS_HOLD_MS = 5000;
 
 export const HouseholdHubPage: React.FC<HouseholdHubPageProps> = ({ currentUser, navigate }) => {
   const employerId = currentUser?.id || 'user-res-1';
-  const employerName = currentUser?.full_name || 'Dr. Tariq Al-Mansoor';
+  const employerName = currentUser?.full_name || 'Resident';
 
   // Data States
   const [staffList, setStaffList] = useState<StaffKYC[]>([]);
@@ -100,15 +100,15 @@ export const HouseholdHubPage: React.FC<HouseholdHubPageProps> = ({ currentUser,
     const myStaff = allStaff.filter(
       (s) =>
         s.employer_id === employerId ||
-        s.employer_house_number === (currentUser?.house_number || 14)
+        (currentUser?.house_number && s.employer_house_number === currentUser.house_number)
     );
-    setStaffList(myStaff.length > 0 ? myStaff : allStaff.slice(0, 3));
+    setStaffList(myStaff);
 
     const allInvites = getStoredInviteCodes();
     const myInvites = allInvites.filter(
       (i) =>
         i.employer_id === employerId ||
-        i.employer_house_number === (currentUser?.house_number || 14)
+        (currentUser?.house_number && i.employer_house_number === currentUser.house_number)
     );
     setInviteCodes(myInvites);
   };

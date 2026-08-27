@@ -137,8 +137,45 @@ export function validateResidentPin(pin: string): {
   };
 }
 
-// Initial demo users - Clean for production
-export const INITIAL_DEMO_USERS: AppUser[] = [];
+// Initial demo users - Seed default admin and security officers
+export const INITIAL_DEMO_USERS: AppUser[] = [
+  {
+    id: 'user-admin-1',
+    auth_user_id: 'auth-admin-1',
+    role: 'admin',
+    full_name: 'Estate Administrator',
+    phone: '+234 801 000 0001',
+    email: 'admin@lighthouseestate.org',
+    house_number: 1,
+    house_unit: 'Main House',
+    status: 'active',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'user-admin-2',
+    auth_user_id: 'auth-admin-2',
+    role: 'master_admin',
+    full_name: 'Master Administrator',
+    phone: '+234 801 000 0002',
+    email: 'mysmestudio@gmail.com',
+    house_number: 1,
+    house_unit: 'Main House',
+    status: 'active',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'user-sec-1',
+    auth_user_id: 'auth-sec-1',
+    role: 'security',
+    full_name: 'Main Gate Security Officer',
+    phone: '+234 801 000 0003',
+    email: 'security@lighthouseestate.org',
+    house_number: 0,
+    house_unit: 'Main House',
+    status: 'active',
+    created_at: new Date().toISOString(),
+  }
+];
 
 const LOCAL_STORAGE_USERS_KEY = 'lighthouse_app_users_v2';
 const LOCAL_STORAGE_CURRENT_USER_KEY = 'lighthouse_current_user_v2';
@@ -148,7 +185,14 @@ export function getStoredAppUsers(): AppUser[] {
     if (typeof localStorage !== 'undefined') {
       const saved = localStorage.getItem(LOCAL_STORAGE_USERS_KEY);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed: AppUser[] = JSON.parse(saved);
+        // Ensure standard admin & security accounts always exist
+        INITIAL_DEMO_USERS.forEach((defaultUser) => {
+          if (!parsed.some((u) => u.email.toLowerCase() === defaultUser.email.toLowerCase())) {
+            parsed.push(defaultUser);
+          }
+        });
+        return parsed;
       }
       localStorage.setItem(LOCAL_STORAGE_USERS_KEY, JSON.stringify(INITIAL_DEMO_USERS));
     }

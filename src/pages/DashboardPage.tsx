@@ -23,7 +23,8 @@ import {
   generatePassCode,
   getStoredNotices
 } from '../lib/estate-data';
-import { triggerSOSEvent } from '../lib/sos-service';
+import { getStoredStaffKYC } from '../lib/staff-service';
+import { triggerSOSEvent, getStoredSOSEvents } from '../lib/sos-service';
 
 interface DashboardPageProps {
   currentUser: AppUser | null;
@@ -104,10 +105,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navig
   const residentPasses = useMemo(() => {
     if (!currentUser) return passes;
     if (currentUser.role === 'resident') {
-      const filtered = passes.filter(
+      return passes.filter(
         (p) => p.house_number === currentUser.house_number && p.house_unit === currentUser.house_unit
       );
-      return filtered.length > 0 ? filtered : passes.slice(0, 3);
     }
     return passes;
   }, [passes, currentUser]);
@@ -119,48 +119,40 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navig
   // Metric counts
   const passesTodayCount = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0];
-    const count = passes.filter((p) => p.created_at?.startsWith(todayStr) || p.valid_from?.startsWith(todayStr)).length;
-    return count > 0 ? count : 14;
+    return passes.filter((p) => p.created_at?.startsWith(todayStr) || p.valid_from?.startsWith(todayStr)).length;
   }, [passes]);
 
   const activePassesCount = useMemo(() => {
-    const count = residentPasses.filter((p) => p.status === 'active').length;
-    return count > 0 ? count : 3;
+    return residentPasses.filter((p) => p.status === 'active').length;
   }, [residentPasses]);
 
   const visitorsInEstateCount = useMemo(() => {
-    const count = accessLogs.filter((l) => l.direction === 'in').length;
-    return count > 0 ? count : 7;
+    return accessLogs.filter((l) => l.direction === 'in').length;
   }, [accessLogs]);
 
-  // Notice filtering
-  const emergencyNotice = useMemo(() => {
-    return notices.find((n) => n.type === 'emergency' || n.priority === 'urgent' || n.category === 'emergency') || {
-      id: 'not-emerg-1',
-      title: 'Mandatory visitor pass pre-registration for Friday Jumu’ah',
-      content: 'All non-resident Friday congregants must be issued digital visitor passes via the portal by 11:30 AM.',
-      date: 'Aug 12',
-      created_at: new Date().toISOString(),
-      type: 'emergency',
-      priority: 'urgent',
-      author: 'Estate Management',
-      category: 'emergency'
-    };
-  }, [notices]);
+  // Household staff count
+  const householdStaffCount = useMemo(() => {
+    const allStaff = getStoredStaffKYC();
+    const myStaff = allStaff.filter(
+      (s) =>
+        (currentUser?.id && s.employer_id === currentUser.id) ||
+        (currentUser?.house_number && s.employer_house_number === currentUser.house_number)
+    );
+    return myStaff.length;
+  }, [currentUser]);
 
-  const infoNotice = useMemo(() => {
-    return notices.find((n) => n.type !== 'emergency' && n.id !== emergencyNotice?.id) || {
-      id: 'not-info-1',
-      title: 'Perimeter solar inverter upgrade & night illumination',
-      content: 'The Central Infrastructure Committee has scheduled routine maintenance and battery replacement on the West wing.',
-      date: 'Aug 16',
-      created_at: new Date().toISOString(),
-      type: 'info',
-      priority: 'normal',
-      author: 'Estate Management',
-      category: 'infrastructure'
-    };
-  }, [notices, emergencyNotice]);
+  // Active alerts count
+  const alertsCount = useMemo(() => {
+    const sosEvents = getStoredSOSEvents();
+    return sosEvents.filter((e) => e.status === 'triggered' || e.status === 'acknowledged').length;
+  }, []);
+
+  // Top notices for dashboard preview (up to 2)
+  const dashboardNotices = useMemo(() => {
+    return [...notices]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 2);
+  }, [notices]);
 
   // User initials
   const userInitials = useMemo(() => {
@@ -357,7 +349,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navig
 
         <div className="max-w-[720px] mx-auto relative z-10 pt-2">
           <h1 className="font-['Sora',sans-serif] font-bold text-[24px] sm:text-[27px] md:text-[29px] tracking-[-0.02em] mb-1.5">
-            Welcome home, {currentUser?.full_name || 'Dr. Tariq'}
+            Welcome home, {currentUser?.full_name || 'Resident'}
           </h1>
           <p className="text-[14px] text-white/70 mb-5.5 font-medium">
             Everything about House {currentUser?.house_number || '14'}, in one place.
@@ -414,7 +406,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navig
 
               <div className="bg-white border border-[#E3EFE7] rounded-[14px] py-3.5 px-2 text-center shadow-xs">
                 <div className="font-['Sora',sans-serif] font-extrabold text-[22px] text-[#257A54] leading-tight">
-                  0
+                  {alertsCount}
                 </div>
                 <div className="text-[10.5px] text-[#8AA096] font-semibold mt-1 leading-tight">
                   Alerts
@@ -641,51 +633,53 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navig
               </button>
             </div>
 
-            {/* Emergency Notice */}
-            <div 
-              onClick={() => navigate('/notices')}
-              className="bg-white border border-[#E3EFE7] rounded-2xl py-3.5 px-4 mb-2.5 cursor-pointer hover:border-[#3FAE7A] transition-all"
-            >
-              <span className="inline-block text-[10px] font-extrabold tracking-[0.05em] py-0.5 px-2.5 rounded-full mb-2 bg-[#FCEBEB] text-[#A32D2D]">
-                Emergency
-              </span>
-              <h3 className="font-['Sora',sans-serif] text-[13.5px] font-bold text-[#16241D] mb-1">
-                {emergencyNotice.title}
-              </h3>
-              <p className="text-[12px] text-[#516459] mb-1.5 leading-relaxed">
-                {emergencyNotice.content}
-              </p>
-              <span className="text-[11px] text-[#8AA096]">
-                {'date' in emergencyNotice && typeof (emergencyNotice as Record<string, unknown>).date === 'string'
-                  ? (emergencyNotice as Record<string, unknown>).date as string
-                  : emergencyNotice.created_at
-                    ? new Date(emergencyNotice.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                    : 'Aug 12'}
-              </span>
-            </div>
-
-            {/* Info Notice */}
-            <div 
-              onClick={() => navigate('/notices')}
-              className="bg-white border border-[#E3EFE7] rounded-2xl py-3.5 px-4 mb-2.5 cursor-pointer hover:border-[#3FAE7A] transition-all"
-            >
-              <span className="inline-block text-[10px] font-extrabold tracking-[0.05em] py-0.5 px-2.5 rounded-full mb-2 bg-[#EAF7EE] text-[#257A54]">
-                Info
-              </span>
-              <h3 className="font-['Sora',sans-serif] text-[13.5px] font-bold text-[#16241D] mb-1">
-                {infoNotice.title}
-              </h3>
-              <p className="text-[12px] text-[#516459] mb-1.5 leading-relaxed">
-                {infoNotice.content}
-              </p>
-              <span className="text-[11px] text-[#8AA096]">
-                {'date' in infoNotice && typeof (infoNotice as Record<string, unknown>).date === 'string'
-                  ? (infoNotice as Record<string, unknown>).date as string
-                  : infoNotice.created_at
-                    ? new Date(infoNotice.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                    : 'Aug 16'}
-              </span>
-            </div>
+            {dashboardNotices.length > 0 ? (
+              dashboardNotices.map((n) => {
+                const isEmerg = n.type === 'emergency' || n.category === 'emergency' || n.priority === 'urgent' || n.priority === 'emergency';
+                const isEvent = n.type === 'event' || n.category === 'event';
+                return (
+                  <div 
+                    key={n.id}
+                    onClick={() => navigate('/notices')}
+                    className={`bg-white border rounded-2xl py-3.5 px-4 mb-2.5 cursor-pointer transition-all ${
+                      isEmerg 
+                        ? 'border-[#A32D2D]/30 bg-gradient-to-r from-[#FFF8F8] to-white' 
+                        : 'border-[#E3EFE7] hover:border-[#3FAE7A]'
+                    }`}
+                  >
+                    <span className={`inline-block text-[10px] font-extrabold tracking-[0.05em] py-0.5 px-2.5 rounded-full mb-2 ${
+                      isEmerg 
+                        ? 'bg-[#FCEBEB] text-[#A32D2D]' 
+                        : isEvent 
+                        ? 'bg-[#FBF3D9] text-[#B4922C]' 
+                        : 'bg-[#EAF7EE] text-[#257A54]'
+                    }`}>
+                      {isEmerg ? 'Emergency' : isEvent ? 'Event' : 'Info'}
+                    </span>
+                    <h3 className="font-['Sora',sans-serif] text-[13.5px] font-bold text-[#16241D] mb-1">
+                      {n.title}
+                    </h3>
+                    <p className="text-[12px] text-[#516459] mb-1.5 leading-relaxed line-clamp-2">
+                      {n.content || n.body}
+                    </p>
+                    <span className="text-[11px] text-[#8AA096]">
+                      {n.created_at
+                        ? new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                        : 'Today'}
+                    </span>
+                  </div>
+                );
+              })
+            ) : (
+              <div 
+                onClick={() => navigate('/notices')}
+                className="bg-white border border-[#E3EFE7] rounded-2xl py-5 px-4 text-center cursor-pointer hover:border-[#3FAE7A] transition-all"
+              >
+                <p className="text-[12.5px] text-[#8AA096] font-medium">
+                  No estate announcements at this time.
+                </p>
+              </div>
+            )}
           </section>
 
           {/* Section 6: Household Management */}
@@ -694,7 +688,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ currentUser, navig
               <div className="flex gap-5 sm:gap-6">
                 <div>
                   <div className="font-['Sora',sans-serif] font-extrabold text-[18px] text-[#257A54] leading-tight">
-                    2
+                    {householdStaffCount}
                   </div>
                   <div className="text-[11px] text-[#8AA096] font-semibold mt-0.5">
                     Household staff

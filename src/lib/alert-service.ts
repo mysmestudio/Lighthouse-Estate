@@ -1,20 +1,9 @@
 import { EstateAlert, VisitorPass, AccessLog } from '../types';
 import { getStoredPasses, saveStoredPasses, getStoredAccessLogs, saveStoredAccessLogs } from './estate-data';
 
-const ALERTS_KEY = 'lighthouse_estate_alerts_v1';
+const ALERTS_KEY = 'lighthouse_estate_alerts_v2';
 
-export const INITIAL_ALERTS: EstateAlert[] = [
-  {
-    id: 'alert-initial-1',
-    type: 'security',
-    title: 'Perimeter Gate 1 Sensor Inspection',
-    message: 'Routine calibration scheduled for outer vehicle boom gate sensors at 18:00.',
-    target_role: 'admin',
-    severity: 'info',
-    created_at: new Date(Date.now() - 3 * 3600000).toISOString(),
-    read: false,
-  }
-];
+export const INITIAL_ALERTS: EstateAlert[] = [];
 
 export function getStoredAlerts(): EstateAlert[] {
   try {

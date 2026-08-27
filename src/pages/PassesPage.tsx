@@ -191,7 +191,7 @@ export const PassesPage: React.FC<PassesPageProps> = ({ currentUser, navigate })
       id: `pass-${Date.now()}`,
       house_number: currentUser?.house_number || 14,
       house_unit: currentUser?.house_unit || 'Main House',
-      resident_name: currentUser?.full_name || 'Dr. Tariq Al-Mansoor',
+      resident_name: currentUser?.full_name || 'Resident',
       resident_id: currentUser?.id || 'res-1',
       guest_name: guestName.trim(),
       guest_phone: guestPhone.trim() || undefined,

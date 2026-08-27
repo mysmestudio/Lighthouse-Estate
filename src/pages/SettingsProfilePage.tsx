@@ -42,22 +42,22 @@ export const SettingsProfilePage: React.FC<SettingsProfilePageProps> = ({
   onLogout
 }) => {
   // Form State
-  const [fullName, setFullName] = useState(currentUser?.full_name || 'Dr. Tariq Al-Mansoor');
-  const [phone, setPhone] = useState(currentUser?.phone || '+234 803 123 4567');
-  const [email, setEmail] = useState(currentUser?.email || 'resident.h14@lighthouseestate.app');
+  const [fullName, setFullName] = useState(currentUser?.full_name || '');
+  const [phone, setPhone] = useState(currentUser?.phone || '');
+  const [email, setEmail] = useState(currentUser?.email || '');
   const [houseNumber, setHouseNumber] = useState<number>(currentUser?.house_number || 14);
   const [houseUnit, setHouseUnit] = useState<HouseUnitType>(currentUser?.house_unit || 'Main House');
   
   // Emergency Contact State
-  const [emergencyName, setEmergencyName] = useState(currentUser?.emergency_contact_name || 'Dr. Amina Al-Mansoor');
-  const [emergencyPhone, setEmergencyPhone] = useState(currentUser?.emergency_contact_phone || '+234 802 987 6543');
-  const [emergencyRelation, setEmergencyRelation] = useState(currentUser?.emergency_relationship || 'Spouse');
+  const [emergencyName, setEmergencyName] = useState(currentUser?.emergency_contact_name || '');
+  const [emergencyPhone, setEmergencyPhone] = useState(currentUser?.emergency_contact_phone || '');
+  const [emergencyRelation, setEmergencyRelation] = useState(currentUser?.emergency_relationship || 'Family Member');
 
   // Vehicle License Plates
   const [vehicles, setVehicles] = useState<string[]>(
     currentUser?.vehicle_plates && currentUser.vehicle_plates.length > 0
       ? currentUser.vehicle_plates
-      : ['KJA-849-EZ', 'LSR-204-AA']
+      : []
   );
   const [newPlateInput, setNewPlateInput] = useState('');
 

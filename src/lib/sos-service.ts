@@ -2,29 +2,10 @@ import { AppUser, SOSEvent, SOSStatus } from '../types';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { getStoredAppUsers } from './auth-helpers';
 
-const SOS_STORAGE_KEY = 'lighthouse_sos_events_v1';
+const SOS_STORAGE_KEY = 'lighthouse_sos_events_v2';
 const SOS_EVENT_CHANNEL = 'lighthouse_sos_events_updated';
 
-// Demo initial historical events for transparency and testing
-export const INITIAL_SOS_EVENTS: SOSEvent[] = [
-  {
-    id: 'sos-demo-1',
-    resident_id: 'user-res-1',
-    resident_name: 'Dr. Tariq Al-Mansoor',
-    resident_phone: '+234 803 123 4567',
-    house_number: 14,
-    house_unit: 'Main House',
-    triggered_at: new Date(Date.now() - 3 * 86400000).toISOString(),
-    status: 'cleared',
-    acknowledged_at: new Date(Date.now() - 3 * 86400000 + 45000).toISOString(),
-    acknowledged_by: 'Officer Ibrahim Bello (Gate 1)',
-    cleared_at: new Date(Date.now() - 3 * 86400000 + 180000).toISOString(),
-    cleared_by: 'Officer Ibrahim Bello (Gate 1)',
-    resolution_notes: 'False trigger during smart home button test. Resident confirmed all safe.',
-    notified_admin_emails: ['admin@lighthouse.estate', 'security-head@lighthouse.estate'],
-    edge_function_dispatched: true,
-  },
-];
+export const INITIAL_SOS_EVENTS: SOSEvent[] = [];
 
 /**
  * Retrieves all stored SOS events from localStorage with fallback

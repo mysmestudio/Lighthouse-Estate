@@ -135,8 +135,8 @@ export const FacilitiesPage: React.FC<FacilitiesPageProps> = ({ currentUser, nav
       const result = createFacilityBooking({
         facilityId: selectedFacility.id,
         residentId: currentUser?.id || 'user-res-1',
-        residentName: currentUser?.full_name || 'Dr. Tariq Al-Mansoor',
-        residentPhone: currentUser?.phone || '+234 803 123 4567',
+        residentName: currentUser?.full_name || 'Resident',
+        residentPhone: currentUser?.phone || '',
         houseNumber: currentUser?.house_number || 14,
         houseUnit: currentUser?.house_unit || 'Main House',
         bookingDate: selectedDate,

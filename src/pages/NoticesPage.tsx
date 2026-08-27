@@ -290,59 +290,73 @@ export const NoticesPage: React.FC<NoticesPageProps> = ({ currentUser, navigate 
 
           {/* Notices List */}
           <div className="space-y-4">
-            {paginatedNotices.map((n) => {
-              const isEmerg = n.type === 'emergency' || n.category === 'emergency' || n.priority === 'urgent' || n.priority === 'emergency';
-              const isEvent = n.type === 'event' || n.category === 'event';
+            {paginatedNotices.length > 0 ? (
+              paginatedNotices.map((n) => {
+                const isEmerg = n.type === 'emergency' || n.category === 'emergency' || n.priority === 'urgent' || n.priority === 'emergency';
+                const isEvent = n.type === 'event' || n.category === 'event';
 
-              return (
-                <div
-                  key={n.id}
-                  className={`bg-white border rounded-2xl p-5 shadow-xs transition-all ${
-                    isEmerg
-                      ? 'border-[#A32D2D]/30 bg-gradient-to-r from-[#FFF8F8] to-white'
-                      : 'border-[#E3EFE7] hover:border-[#3FAE7A]/40'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-['Sora'] font-bold uppercase tracking-wider ${
-                        isEmerg
-                          ? 'bg-[#FCEBEB] text-[#A32D2D]'
-                          : isEvent
-                          ? 'bg-[#FBF3D9] text-[#B4922C]'
-                          : 'bg-[#EAF7EE] text-[#257A54]'
-                      }`}>
-                        {isEmerg ? 'Emergency Notice' : isEvent ? 'Community Event' : 'Estate Update'}
-                      </span>
-                      {isEmerg && (
-                        <span className="px-2 py-0.5 rounded-full bg-[#A32D2D] text-white text-[10px] font-bold flex items-center gap-1 animate-pulse">
-                          <Flame className="w-3 h-3" />
-                          <span>Urgent</span>
+                return (
+                  <div
+                    key={n.id}
+                    className={`bg-white border rounded-2xl p-5 shadow-xs transition-all ${
+                      isEmerg
+                        ? 'border-[#A32D2D]/30 bg-gradient-to-r from-[#FFF8F8] to-white'
+                        : 'border-[#E3EFE7] hover:border-[#3FAE7A]/40'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-['Sora'] font-bold uppercase tracking-wider ${
+                          isEmerg
+                            ? 'bg-[#FCEBEB] text-[#A32D2D]'
+                            : isEvent
+                            ? 'bg-[#FBF3D9] text-[#B4922C]'
+                            : 'bg-[#EAF7EE] text-[#257A54]'
+                        }`}>
+                          {isEmerg ? 'Emergency Notice' : isEvent ? 'Community Event' : 'Estate Update'}
                         </span>
-                      )}
+                        {isEmerg && (
+                          <span className="px-2 py-0.5 rounded-full bg-[#A32D2D] text-white text-[10px] font-bold flex items-center gap-1 animate-pulse">
+                            <Flame className="w-3 h-3" />
+                            <span>Urgent</span>
+                          </span>
+                        )}
+                      </div>
+
+                      <span className="text-[11px] text-[#8AA096] flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {new Date(n.created_at).toLocaleDateString()}
+                      </span>
                     </div>
 
-                    <span className="text-[11px] text-[#8AA096] flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {new Date(n.created_at).toLocaleDateString()}
-                    </span>
+                    <h3 className="font-['Sora'] font-bold text-base text-[#16241D] mb-1.5">
+                      {n.title}
+                    </h3>
+
+                    <p className="text-xs text-[#516459] leading-relaxed mb-3">
+                      {n.body || n.content}
+                    </p>
+
+                    <div className="flex items-center justify-between text-[11px] text-[#8AA096] pt-2 border-t border-[#E3EFE7]">
+                      <span>Published by: <strong className="text-[#16241D]">{n.author_name || 'Light House Estate Management Exco'}</strong></span>
+                      <span className="text-[#257A54] font-medium">{n.author_role || 'Estate Administration'}</span>
+                    </div>
                   </div>
-
-                  <h3 className="font-['Sora'] font-bold text-base text-[#16241D] mb-1.5">
-                    {n.title}
-                  </h3>
-
-                  <p className="text-xs text-[#516459] leading-relaxed mb-3">
-                    {n.body || n.content}
-                  </p>
-
-                  <div className="flex items-center justify-between text-[11px] text-[#8AA096] pt-2 border-t border-[#E3EFE7]">
-                    <span>Published by: <strong className="text-[#16241D]">{n.author_name || 'Light House Estate Management Exco'}</strong></span>
-                    <span className="text-[#257A54] font-medium">{n.author_role || 'Estate Administration'}</span>
-                  </div>
+                );
+              })
+            ) : (
+              <div className="bg-white border border-[#E3EFE7] rounded-2xl py-12 px-4 text-center">
+                <div className="w-12 h-12 rounded-full bg-[#EAF7EE] text-[#257A54] flex items-center justify-center mx-auto mb-3">
+                  <Bell className="w-6 h-6" />
                 </div>
-              );
-            })}
+                <h3 className="font-['Sora'] font-bold text-base text-[#16241D] mb-1">
+                  No Announcements Yet
+                </h3>
+                <p className="text-xs text-[#8AA096] max-w-sm mx-auto leading-relaxed">
+                  Official estate bulletins, security advisories, and community notices will appear here once published by estate administrators.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Pagination */}

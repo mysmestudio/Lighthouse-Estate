@@ -202,9 +202,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     e.preventDefault();
     setInviteError('');
 
-    const cleanCode = inviteCode.trim().toUpperCase();
+    const cleanCode = inviteCode.trim();
     if (!cleanCode) {
-      setInviteError('Enter your invite code.');
+      setInviteError('Enter your 6-digit invite code.');
       return;
     }
 
@@ -222,54 +222,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         setStaffRole(res.invite.role || 'Cook');
         setActiveView('staff-2');
       } else {
-        // Fallback for valid demo invite codes like LH-6X92K
-        const fallbackInvite = {
-          id: `inv-${Date.now()}`,
-          code: cleanCode,
-          employer_id: 'user-res-1',
-          employer_name: 'Dr. Tariq Al-Mansoor',
-          employer_house_number: 14,
-          employer_house_unit: 'Main House' as HouseUnitType,
-          role: 'Cook' as any,
-          work_location: 'Main House',
-          schedule: { days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], startTime: '08:00', endTime: '17:00' },
-          expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-          used: false,
-          created_at: new Date().toISOString()
-        };
-        setValidatedInviteObj(fallbackInvite);
-        setVerifiedInviteData({
-          code: cleanCode,
-          house_number: 14,
-          house_unit: 'Main House',
-          role: 'Cook',
-        });
-        setStaffRole('Cook');
-        setActiveView('staff-2');
+        setInviteError(res.error || 'Invalid or expired invite code. Please request a new invite from your employer.');
       }
-    } catch (err) {
-      const fallbackInvite = {
-        id: `inv-${Date.now()}`,
-        code: cleanCode,
-        employer_id: 'user-res-1',
-        employer_name: 'Dr. Tariq Al-Mansoor',
-        employer_house_number: 14,
-        employer_house_unit: 'Main House' as HouseUnitType,
-        role: 'Cook' as any,
-        work_location: 'Main House',
-        schedule: { days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], startTime: '08:00', endTime: '17:00' },
-        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-        used: false,
-        created_at: new Date().toISOString()
-      };
-      setValidatedInviteObj(fallbackInvite);
-      setVerifiedInviteData({
-        code: cleanCode,
-        house_number: 14,
-        house_unit: 'Main House',
-        role: 'Cook',
-      });
-      setActiveView('staff-2');
+    } catch (err: any) {
+      setInviteError(err?.message || 'Unable to verify invite code. Please try again.');
     } finally {
       setInviteLoading(false);
     }
@@ -279,6 +235,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const handleStaffFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStaffError('');
+
+    if (!validatedInviteObj) {
+      setStaffError('Please enter and verify your invite code first.');
+      setActiveView('staff-1');
+      return;
+    }
 
     if (!staffName.trim()) {
       setStaffError('Enter your full name.');
@@ -307,28 +269,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
     setStaffLoading(true);
     try {
-      const inviteToUse = validatedInviteObj || {
-        id: `inv-${Date.now()}`,
-        code: inviteCode || 'LH-6X92K',
-        employer_id: 'user-res-1',
-        employer_name: 'Dr. Tariq Al-Mansoor',
-        employer_house_number: verifiedInviteData?.house_number || 14,
-        employer_house_unit: (verifiedInviteData?.house_unit || 'Main House') as HouseUnitType,
-        role: (staffRole || 'Cook') as any,
-        work_location: 'Estate Grounds',
-        schedule: { days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], startTime: '08:00', endTime: '17:00' },
-        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-        used: false,
-        created_at: new Date().toISOString()
-      };
-
       const res = await submitStaffOnboarding({
-        invite: inviteToUse,
+        invite: validatedInviteObj,
         fullName: staffName.trim(),
         phone: staffPhone.trim(),
         dob: '1995-01-01',
         gender: 'Female',
-        homeAddress: 'Lekki Phase 1',
+        homeAddress: 'Lekki, Lagos',
         nin: idNumber.trim(),
         nextOfKin: {
           name: gName.trim(),
@@ -492,9 +439,28 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
-                        Email Address
-                      </label>
+                      <div className="flex justify-between items-center">
+                        <label className="block text-[12px] font-bold text-[#516459] uppercase tracking-[0.04em]">
+                          Email Address
+                        </label>
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => { setAdminEmail('admin@lighthouseestate.org'); setAdminRole('admin'); }}
+                            className="text-[10.5px] font-bold text-[#257A54] hover:underline cursor-pointer"
+                          >
+                            admin@...
+                          </button>
+                          <span className="text-[#8AA096] text-[10.5px]">&bull;</span>
+                          <button
+                            type="button"
+                            onClick={() => { setAdminEmail('mysmestudio@gmail.com'); setAdminRole('admin'); }}
+                            className="text-[10.5px] font-bold text-[#257A54] hover:underline cursor-pointer"
+                          >
+                            mysmestudio@...
+                          </button>
+                        </div>
+                      </div>
                       <input
                         type="email"
                         value={adminEmail}

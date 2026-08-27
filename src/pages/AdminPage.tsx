@@ -15,6 +15,7 @@ import {
   fetchAdminStats, 
   AdminStats 
 } from '../lib/estate-data';
+import { getStoredBookings } from '../lib/facility-helpers';
 import { triggerSOSEvent } from '../lib/sos-service';
 import { 
   getAlertsForUser, 
@@ -219,6 +220,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentUser, navigate }) =
   };
 
   const pendingApprovalsCount = approvals.filter(a => a.status === 'pending').length;
+  const activeResidents = users.filter(u => u.role === 'resident' && u.status === 'active');
+  const occupiedHouseholdsCount = new Set(activeResidents.map(u => u.house_number)).size;
+  const activeAlertsCount = alerts.filter(a => !a.resolved).length;
+  const recentBookings = getStoredBookings().slice(0, 5);
 
   return (
     <div className="min-h-screen bg-[#FBFDF9] text-[#16241D] font-['Manrope',sans-serif] leading-[1.55] pb-[110px] relative antialiased">
@@ -282,7 +287,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentUser, navigate }) =
             Welcome back, {currentUser?.full_name?.split(' ')[0] || 'Estate Admin'}
           </h1>
           <p className="text-[14px] text-white/75">
-            {pendingApprovalsCount} {pendingApprovalsCount === 1 ? 'approval' : 'approvals'} and 1 flagged log need your review today.
+            {pendingApprovalsCount} {pendingApprovalsCount === 1 ? 'approval' : 'approvals'} and {activeAlertsCount} {activeAlertsCount === 1 ? 'active alert' : 'active alerts'} need your review today.
           </p>
         </div>
       </div>
@@ -304,7 +309,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentUser, navigate }) =
               </div>
               <div className="bg-white border border-[#E3EFE7] rounded-[14px] p-3.5 py-3.5 text-center">
                 <div className="font-['Sora',sans-serif] font-extrabold text-[22px] text-[#257A54]">
-                  94
+                  {occupiedHouseholdsCount}
                 </div>
                 <div className="text-[10.5px] text-[#8AA096] font-semibold mt-[3px] leading-[1.3]">
                   Occupied households
@@ -312,7 +317,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentUser, navigate }) =
               </div>
               <div className="bg-white border border-[#E3EFE7] rounded-[14px] p-3.5 py-3.5 text-center">
                 <div className="font-['Sora',sans-serif] font-extrabold text-[22px] text-[#257A54]">
-                  82%
+                  {occupiedHouseholdsCount > 0 ? '100%' : '0%'}
                 </div>
                 <div className="text-[10.5px] text-[#8AA096] font-semibold mt-[3px] leading-[1.3]">
                   Dues collected
@@ -322,17 +327,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentUser, navigate }) =
                 type="button"
                 onClick={() => setShowActiveAlertsModal(true)}
                 className={`bg-white border rounded-[14px] p-3.5 py-3.5 text-center transition-all cursor-pointer hover:shadow-md ${
-                  alerts.length > 0 ? 'border-[#F0938F] bg-[#FFF8F8]' : 'border-[#E3EFE7]'
+                  activeAlertsCount > 0 ? 'border-[#F0938F] bg-[#FFF8F8]' : 'border-[#E3EFE7]'
                 }`}
               >
                 <div className={`font-['Sora',sans-serif] font-extrabold text-[22px] ${
-                  alerts.length > 0 ? 'text-[#A32D2D]' : 'text-[#257A54]'
+                  activeAlertsCount > 0 ? 'text-[#A32D2D]' : 'text-[#257A54]'
                 }`}>
-                  {alerts.length}
+                  {activeAlertsCount}
                 </div>
                 <div className="text-[10.5px] text-[#8AA096] font-semibold mt-[3px] leading-[1.3] flex items-center justify-center gap-1">
                   <span>Active alerts</span>
-                  {alerts.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-[#A32D2D] animate-ping" />}
+                  {activeAlertsCount > 0 && <span className="w-1.5 h-1.5 rounded-full bg-[#A32D2D] animate-ping" />}
                 </div>
               </button>
             </div>
@@ -513,19 +518,25 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentUser, navigate }) =
                   </div>
 
                   <div className="h-[112px] overflow-hidden relative [mask-image:linear-gradient(to_bottom,transparent,#000_12%,#000_88%,transparent)]">
-                    <div className="space-y-1 py-0.5">
-                      {accessLogs.slice(0, 4).map((log) => (
-                        <div key={log.id} className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/8">
-                          <span className="text-white/40 flex-shrink-0 w-11 font-mono">
-                            {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
-                          </span>
-                          <span className={`${log.notes?.toLowerCase().includes('overstay') ? 'text-[#F0938F] font-bold' : 'text-white font-semibold'}`}>
-                            {log.house_info} &middot; {log.visitor_name} &middot; {log.direction.toUpperCase()}
-                            {log.notes ? ` (${log.notes})` : ''}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                    {accessLogs.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full text-center text-white/50 text-xs">
+                        <span>No gate access recorded yet today</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-1 py-0.5">
+                        {accessLogs.slice(0, 4).map((log) => (
+                          <div key={log.id} className="flex gap-2.5 py-2 text-[12px] text-white/70 border-b border-dashed border-white/8">
+                            <span className="text-white/40 flex-shrink-0 w-11 font-mono">
+                              {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                            </span>
+                            <span className={`${log.notes?.toLowerCase().includes('overstay') ? 'text-[#F0938F] font-bold' : 'text-white font-semibold'}`}>
+                              {log.house_info} &middot; {log.visitor_name} &middot; {log.direction.toUpperCase()}
+                              {log.notes ? ` (${log.notes})` : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -555,14 +566,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentUser, navigate }) =
             </div>
             <div className="bg-white border border-[#E3EFE7] rounded-[18px] p-[18px] px-5">
               <div className="flex justify-between items-center text-[12.5px] text-[#516459]">
-                <span>82% collected this month</span>
-                <span>18 households outstanding</span>
+                <span>{occupiedHouseholdsCount > 0 ? '100% current' : '0% assessed (No active residents)'}</span>
+                <span>0 households outstanding</span>
               </div>
               <div className="h-2 rounded-full bg-[#E3EFE7] overflow-hidden my-3">
-                <div className="h-full w-[82%] bg-gradient-to-r from-[#3FAE7A] to-[#257A54] rounded-full" />
+                <div 
+                  className="h-full bg-gradient-to-r from-[#3FAE7A] to-[#257A54] rounded-full transition-all"
+                  style={{ width: occupiedHouseholdsCount > 0 ? '100%' : '0%' }}
+                />
               </div>
               <div className="flex justify-between items-center text-[12.5px] text-[#516459]">
-                <span>Next reminder cycle: Sep 1</span>
+                <span>Billing cycle: Quarterly</span>
                 <button
                   type="button"
                   onClick={() => setShowExemptionModal(true)}
@@ -589,33 +603,29 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentUser, navigate }) =
               </button>
             </div>
 
-            <div className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 px-4 mb-2.5 flex justify-between items-center gap-2.5">
-              <div>
-                <div className="text-[13.5px] font-bold text-[#16241D] mb-0.5">
-                  Mosque hall
-                </div>
-                <div className="text-[11.5px] text-[#8AA096]">
-                  Friday Jumu&rsquo;ah &middot; House 14 group booking
-                </div>
+            {recentBookings.length === 0 ? (
+              <div className="bg-white border border-[#E3EFE7] rounded-2xl p-5 text-center">
+                <p className="text-xs text-[#8AA096] font-semibold">No facility reservations scheduled for this week.</p>
               </div>
-              <span className="text-[10.5px] font-bold py-1 px-2.5 rounded-full whitespace-nowrap bg-[#EAF7EE] text-[#257A54]">
-                Confirmed
-              </span>
-            </div>
-
-            <div className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 px-4 mb-2.5 flex justify-between items-center gap-2.5">
-              <div>
-                <div className="text-[13.5px] font-bold text-[#16241D] mb-0.5">
-                  Football pitch
+            ) : (
+              recentBookings.map((b) => (
+                <div key={b.id} className="bg-white border border-[#E3EFE7] rounded-2xl p-3.5 px-4 mb-2.5 flex justify-between items-center gap-2.5">
+                  <div>
+                    <div className="text-[13.5px] font-bold text-[#16241D] mb-0.5">
+                      {b.facility_name}
+                    </div>
+                    <div className="text-[11.5px] text-[#8AA096]">
+                      {b.booking_date} &middot; {b.time_slot} &middot; House {b.house_number}
+                    </div>
+                  </div>
+                  <span className={`text-[10.5px] font-bold py-1 px-2.5 rounded-full whitespace-nowrap ${
+                    b.status === 'confirmed' ? 'bg-[#EAF7EE] text-[#257A54]' : 'bg-[#FBF3D9] text-[#B4922C]'
+                  }`}>
+                    {b.status.toUpperCase()}
+                  </span>
                 </div>
-                <div className="text-[11.5px] text-[#8AA096]">
-                  Saturday, 4:00 PM &middot; House 23
-                </div>
-              </div>
-              <span className="text-[10.5px] font-bold py-1 px-2.5 rounded-full whitespace-nowrap bg-[#FBF3D9] text-[#B4922C]">
-                Pending
-              </span>
-            </div>
+              ))
+            )}
           </section>
 
         </div>
@@ -1000,19 +1010,25 @@ export const AdminPage: React.FC<AdminPageProps> = ({ currentUser, navigate }) =
                 ✕
               </button>
             </div>
-            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-              {accessLogs.slice(0, 10).map((log) => (
-                <div key={log.id} className="p-3 rounded-xl bg-[#FBFDF9] border border-[#E3EFE7] flex justify-between items-center text-[12.5px]">
-                  <div>
-                    <span className="font-bold text-[#16241D]">{log.house_info || 'House 14'}</span> &middot; {log.direction.toUpperCase()}
-                    <div className="text-[11px] text-[#8AA096]">{log.visitor_name} &middot; Guard {log.guard_name}</div>
+            {accessLogs.length === 0 ? (
+              <div className="py-8 text-center bg-[#FBFDF9] rounded-2xl border border-[#E3EFE7] my-3">
+                <p className="text-xs text-[#8AA096] font-semibold">No gate access logs recorded yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                {accessLogs.slice(0, 10).map((log) => (
+                  <div key={log.id} className="p-3 rounded-xl bg-[#FBFDF9] border border-[#E3EFE7] flex justify-between items-center text-[12.5px]">
+                    <div>
+                      <span className="font-bold text-[#16241D]">{log.house_info || 'Estate Gate'}</span> &middot; {log.direction.toUpperCase()}
+                      <div className="text-[11px] text-[#8AA096]">{log.visitor_name} &middot; Guard {log.guard_name}</div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#EAF7EE] text-[#257A54]">
+                      Logged
+                    </span>
                   </div>
-                  <span className="px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#EAF7EE] text-[#257A54]">
-                    Logged
-                  </span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
             <button
               type="button"
               onClick={() => setShowAllLogsModal(false)}
