@@ -34,8 +34,15 @@ export const PinInputBoxes: React.FC<PinInputBoxesProps> = ({
 
   const handleChange = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     let inputChar = e.target.value.slice(-1);
+    
     if (isAlphanumeric) {
-      inputChar = inputChar.toUpperCase().replace(/[^0-9A-Z]/g, '');
+      if (index < 4) {
+        // First 4 must be digits
+        inputChar = inputChar.replace(/[^0-9]/g, '');
+      } else {
+        // Last 2 must be letters
+        inputChar = inputChar.toUpperCase().replace(/[^A-Z]/g, '');
+      }
     } else {
       inputChar = inputChar.replace(/[^0-9]/g, '');
     }
@@ -70,10 +77,20 @@ export const PinInputBoxes: React.FC<PinInputBoxesProps> = ({
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
     const pastedData = e.clipboardData.getData('text').trim().toUpperCase();
-    let cleaned = isAlphanumeric
-      ? pastedData.replace(/[^0-9A-Z]/g, '')
-      : pastedData.replace(/[^0-9]/g, '');
-    cleaned = cleaned.slice(0, length);
+    let cleaned = '';
+    
+    if (isAlphanumeric) {
+      for (let i = 0; i < Math.min(pastedData.length, length); i++) {
+        if (i < 4) {
+          cleaned += pastedData[i].replace(/[^0-9]/g, '');
+        } else {
+          cleaned += pastedData[i].replace(/[^A-Z]/g, '');
+        }
+      }
+    } else {
+      cleaned = pastedData.replace(/[^0-9]/g, '').slice(0, length);
+    }
+    
     onChange(cleaned);
 
     const targetIdx = Math.min(cleaned.length, length - 1);

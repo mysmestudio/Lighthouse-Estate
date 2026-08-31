@@ -45,7 +45,7 @@ export const SettingsProfilePage: React.FC<SettingsProfilePageProps> = ({
   const [fullName, setFullName] = useState(currentUser?.full_name || '');
   const [phone, setPhone] = useState(currentUser?.phone || '');
   const [email, setEmail] = useState(currentUser?.email || '');
-  const [houseNumber, setHouseNumber] = useState<number>(currentUser?.house_number || 14);
+  const [houseNumber, setHouseNumber] = useState<number>(currentUser?.house_number || 0);
   const [houseUnit, setHouseUnit] = useState<HouseUnitType>(currentUser?.house_unit || 'Main House');
   
   // Emergency Contact State
@@ -254,7 +254,13 @@ export const SettingsProfilePage: React.FC<SettingsProfilePageProps> = ({
             </svg>
           </button>
           <span className="font-['Sora'] font-bold text-xs sm:text-sm text-white tracking-tight">
-            House {houseNumber} · {houseUnit}
+            {currentUser?.role === 'resident' && houseNumber
+              ? `House ${houseNumber} · ${houseUnit}`
+              : currentUser?.role === 'admin' || currentUser?.role === 'master_admin'
+              ? 'Estate Administrator Profile'
+              : currentUser?.role === 'security'
+              ? 'Security Officer Profile'
+              : 'Account Settings'}
           </span>
         </div>
 

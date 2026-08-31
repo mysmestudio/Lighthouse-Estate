@@ -168,9 +168,13 @@ export const StaffDirectoryPage: React.FC<StaffDirectoryPageProps> = ({ currentU
             </svg>
           </button>
           <span className="font-['Sora'] font-bold text-xs sm:text-sm text-white tracking-tight">
-            {currentUser?.role === 'resident'
+            {currentUser?.role === 'resident' && currentUser?.house_number
               ? `House ${currentUser.house_number} · ${currentUser.house_unit || 'Main House'}`
-              : 'Staff Roster'}
+              : currentUser?.role === 'admin' || currentUser?.role === 'master_admin'
+              ? 'Estate Management'
+              : currentUser?.role === 'security'
+              ? 'Gate Security'
+              : 'Estate Staff Registry'}
           </span>
         </div>
 
@@ -363,7 +367,7 @@ export const StaffDirectoryPage: React.FC<StaffDirectoryPageProps> = ({ currentU
                         <div className="flex items-center gap-2">
                           <Home className="w-3.5 h-3.5 text-[#8AA096]" />
                           <span>
-                            House {staff.employer_house_number || 14} ({staff.employer_name || 'Resident'})
+                            {staff.employer_house_number ? `House ${staff.employer_house_number}` : 'Estate Facility'} ({staff.employer_name || 'Resident'})
                           </span>
                         </div>
                         <div className="flex items-center gap-2">

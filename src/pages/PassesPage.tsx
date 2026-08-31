@@ -189,7 +189,7 @@ export const PassesPage: React.FC<PassesPageProps> = ({ currentUser, navigate })
 
     const newPass: VisitorPass = {
       id: `pass-${Date.now()}`,
-      house_number: currentUser?.house_number || 14,
+      house_number: currentUser?.house_number || 0,
       house_unit: currentUser?.house_unit || 'Main House',
       resident_name: currentUser?.full_name || 'Resident',
       resident_id: currentUser?.id || 'res-1',
@@ -387,8 +387,12 @@ export const PassesPage: React.FC<PassesPageProps> = ({ currentUser, navigate })
             </svg>
           </div>
           <span className="font-['Sora'] font-bold text-xs sm:text-sm text-white tracking-tight">
-            {currentUser?.role === 'resident'
+            {currentUser?.role === 'resident' && currentUser?.house_number
               ? `House ${currentUser.house_number} · ${currentUser.house_unit || 'Main House'}`
+              : currentUser?.role === 'admin' || currentUser?.role === 'master_admin'
+              ? 'Estate Passes Registry'
+              : currentUser?.role === 'security'
+              ? 'Gate Pass Verification'
               : 'Visitor Passes'}
           </span>
         </div>

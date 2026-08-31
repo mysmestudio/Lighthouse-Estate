@@ -136,6 +136,32 @@ Please show this to estate security at the gate (or let them scan the QR).
 🕌 Light House Estate is a Muslim Residential Community. Visitors are expected to respect community values.`;
 }
 
+export function logAccessAndNotify(
+  partialLog: Omit<AccessLog, 'id' | 'timestamp' | 'is_late_access'>,
+  allLogs: AccessLog[]
+): AccessLog {
+  const timestamp = new Date().toISOString();
+  const hours = new Date(timestamp).getHours();
+  const is_late_access = hours >= 22 || hours < 5;
+
+  const newLog: AccessLog = {
+    ...partialLog,
+    id: `log-${Date.now()}`,
+    timestamp,
+    is_late_access,
+  };
+
+  saveStoredAccessLogs([newLog, ...allLogs]);
+
+  // Household-wide access email notification (Simulated)
+  console.log(`[EMAIL DISPATCH] To Household ${partialLog.house_info} Email:
+Subject: Gate Access Alert
+Body: Pass/PIN ${partialLog.pass_code || '[Hidden]'} was used for ${partialLog.direction.toUpperCase()} at ${partialLog.guard_name} on ${new Date(timestamp).toLocaleString()}. 
+Visitor/Pass info: ${partialLog.visitor_name}`);
+
+  return newLog;
+}
+
 /**
  * Get stored verification attempts
  */
@@ -196,19 +222,16 @@ export async function verifyGatePassAtGatehouse(params: {
         // Also sync local access logs if returned
         if (data.success && data.pass) {
           const allLogs = getStoredAccessLogs();
-          const newLog: AccessLog = {
-            id: `log-${Date.now()}`,
+          logAccessAndNotify({
             pass_code: data.code,
             visitor_name: data.pass.guest_name,
             house_info: `House ${data.pass.house_number} (${data.pass.house_unit})`,
             direction: data.actionTaken === 'granted_exit' ? 'out' : 'in',
             guard_name,
-            timestamp: new Date().toISOString(),
             vehicle_plate: data.pass.guest_plate_number,
             verified_method: method,
             notes: data.message,
-          };
-          saveStoredAccessLogs([newLog, ...allLogs]);
+          }, allLogs);
         }
         return data as VerificationResult;
       }
@@ -436,20 +459,17 @@ export async function verifyGatePassAtGatehouse(params: {
       house_info: `House ${pass.house_number} (${pass.house_unit})`,
     });
 
-    const newLog: AccessLog = {
-      id: `log-${Date.now()}`,
+    logAccessAndNotify({
       pass_id: pass.id,
       pass_code: pass.pass_code,
       visitor_name: pass.guest_name,
       house_info: `House ${pass.house_number} (${pass.house_unit})`,
       direction,
       guard_name,
-      timestamp: now.toISOString(),
       vehicle_plate: pass.guest_plate_number,
       verified_method: method,
       notes: `Multi-entry pass scan (${direction.toUpperCase()}). Valid to: ${pass.valid_to || 'Date'}`,
-    };
-    saveStoredAccessLogs([newLog, ...allLogs]);
+    }, allLogs);
 
     return {
       success: true,
@@ -569,22 +589,19 @@ export async function verifyGatePassAtGatehouse(params: {
       });
 
       const allLogs = getStoredAccessLogs();
-      const newLog: AccessLog = {
-        id: `log-${Date.now()}`,
+      logAccessAndNotify({
         pass_id: pass.id,
         pass_code: pass.pass_code,
         visitor_name: pass.guest_name,
         house_info: `House ${pass.house_number} (${pass.house_unit})`,
         direction: 'out',
         guard_name,
-        timestamp: now.toISOString(),
         vehicle_plate: pass.guest_plate_number,
         verified_method: method,
         notes: isOverstaying 
           ? `Outbound contractor exit. ⚠️ Overstay logged: departed past ${pass.end_time || '17:00'}. Escalate to Resident & Admin.` 
           : `Outbound contractor exit clearance completed.`,
-      };
-      saveStoredAccessLogs([newLog, ...allLogs]);
+      }, allLogs);
 
       return {
         success: true,
@@ -682,20 +699,17 @@ export async function verifyGatePassAtGatehouse(params: {
     });
 
     const allLogs = getStoredAccessLogs();
-    const newLog: AccessLog = {
-      id: `log-${Date.now()}`,
+    logAccessAndNotify({
       pass_id: pass.id,
       pass_code: pass.pass_code,
       visitor_name: pass.guest_name,
       house_info: `House ${pass.house_number} (${pass.house_unit})`,
       direction: 'in',
       guard_name,
-      timestamp: now.toISOString(),
       vehicle_plate: pass.guest_plate_number,
       verified_method: method,
       notes: `Inbound visitor entry cleared. Type: ${pass.pass_type}`,
-    };
-    saveStoredAccessLogs([newLog, ...allLogs]);
+    }, allLogs);
 
     return {
       success: true,
@@ -743,20 +757,17 @@ export async function verifyGatePassAtGatehouse(params: {
     });
 
     const allLogs = getStoredAccessLogs();
-    const newLog: AccessLog = {
-      id: `log-${Date.now()}`,
+    logAccessAndNotify({
       pass_id: pass.id,
       pass_code: pass.pass_code,
       visitor_name: pass.guest_name,
       house_info: `House ${pass.house_number} (${pass.house_unit})`,
       direction: 'out',
       guard_name,
-      timestamp: now.toISOString(),
       vehicle_plate: pass.guest_plate_number,
       verified_method: method,
       notes: `Outbound exit clearance completed.`,
-    };
-    saveStoredAccessLogs([newLog, ...allLogs]);
+    }, allLogs);
 
     return {
       success: true,
@@ -832,4 +843,72 @@ export async function verifyGatePassAtGatehouse(params: {
     message: `Pass state is ${pass.status}. Access denied.`,
     timestamp: now.toISOString(),
   };
+}
+
+export async function createGatePass(params: any): Promise<{ success: boolean; pass?: VisitorPass; error?: string }> {
+  try {
+    const allPasses = getStoredPasses();
+    const passCode = generateUnique6DigitCode(allPasses.filter(p => p.status === 'active').map(p => p.pass_code));
+    
+    // Quick validation
+    if (!params.visitorName && params.passType !== 'jumuah' && params.passType !== 'offline') {
+       return { success: false, error: 'Visitor name is required' };
+    }
+
+    const { validFrom, validUntil } = calculatePassExpiry(params.passType as PassType, params.validUntil);
+    
+    const newPass: VisitorPass = {
+      id: `pass-${Date.now()}`,
+      pass_code: passCode,
+      pin: passCode,
+      guest_name: params.visitorName,
+      visitor_name: params.visitorName, // added compat
+      pass_type: params.passType as PassType,
+      guest_phone: params.visitorPhone,
+      guest_plate_number: params.vehiclePlate,
+      guest_count: params.guestCount || 1,
+      house_number: params.houseNumber,
+      house_unit: params.houseUnit,
+      status: 'active',
+      valid_from: params.validFrom ? new Date(params.validFrom).toISOString() : validFrom,
+      valid_to: params.validUntil ? new Date(params.validUntil).toISOString() : validUntil,
+      valid_until: params.validUntil ? new Date(params.validUntil).toISOString() : validUntil,
+      created_at: new Date().toISOString(),
+      notes: params.notes,
+      // custom fields
+      artisan_date: new Date().toISOString().split('T')[0],
+      start_time: params.arrives,
+      end_time: params.mustExitTime,
+      trade_company: params.tradeCompany
+    } as any;
+
+    const updated = [newPass, ...allPasses];
+    saveStoredPasses(updated);
+
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('passes').insert({
+          pass_code: newPass.pass_code,
+          guest_name: newPass.guest_name,
+          pass_type: newPass.pass_type,
+          house_number: newPass.house_number,
+          house_unit: newPass.house_unit,
+          valid_from: newPass.valid_from,
+          valid_to: newPass.valid_to,
+          status: newPass.status
+        });
+      } catch (e) {
+        console.warn('Could not sync pass to Supabase');
+      }
+    }
+
+    // SIMULATED EMAIL DISPATCH
+    console.log(`[EMAIL DISPATCH] To Household ${params.houseNumber} Email:
+Subject: New Gate Pass Created
+Body: A ${params.passType} pass was issued for ${params.visitorName} with PIN ${passCode}.`);
+
+    return { success: true, pass: newPass };
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
 }

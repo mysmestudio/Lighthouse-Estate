@@ -27,8 +27,8 @@ export interface AppUser {
   full_name: string;
   phone: string;
   email: string;
-  house_number: number;
-  house_unit: HouseUnitType;
+  house_number?: number;
+  house_unit?: HouseUnitType;
   pin?: string;
   pin_hash?: string;
   status: UserStatus;
@@ -44,6 +44,9 @@ export interface AppUser {
   notify_gate_alerts?: boolean;
   notify_notices?: boolean;
   notify_sms?: boolean;
+  madrasa_enrolment?: boolean;
+  mosque_notices?: boolean;
+  volunteer_committee?: boolean;
 }
 
 export type PassType = 
@@ -78,14 +81,14 @@ export interface VisitorPass {
   pass_type: PassType;
   entry_type?: EntryType; // distinguishes 'single' (Guest, Delivery, Exit) from 'multi' (Long Stay, Group)
   artisan_date?: string; // YYYY-MM-DD for Artisan/Contractor
-  start_time?: string; // HH:mm for Artisan/Contractor
-  end_time?: string; // HH:mm for Artisan/Contractor
-  valid_to?: string; // YYYY-MM-DD for Long Stay Visitor
+  start_time?: string;
+  end_time?: string;
+  valid_to?: string;
   guest_count?: number;
   pass_code: string; // 6-digit numeric code
   qr_payload?: string;
   valid_from: string;
-  valid_until: string; // alias/same as expires_at
+  valid_until: string;
   expires_at?: string;
   status: PassStatus;
   overstayed?: boolean;
@@ -147,6 +150,8 @@ export interface VerificationResult {
     resident_name: string;
     resident_phone?: string;
     valid_until: string;
+    end_time?: string;
+    valid_to?: string;
     status: PassStatus;
   };
   timestamp: string;
@@ -181,6 +186,7 @@ export interface AccessLog {
   vehicle_plate?: string;
   verified_method: 'pin' | 'qr' | 'manual' | 'resident_override';
   notes?: string;
+  is_late_access?: boolean;
 }
 
 // Domestic Staff & KYC Management Types
@@ -400,7 +406,9 @@ export interface Facility {
   location: string;
   imageUrl: string;
   operatingHours: string;
-  availableTimeSlots: string[];
+  openTime?: string;
+  closeTime?: string;
+  availableTimeSlots?: string[];
   features: string[];
   rules: string[];
   hourlyRate: string;
@@ -431,3 +439,36 @@ export interface FacilityBooking {
   admin_notes?: string;
 }
 
+
+// Madrasa Types
+export interface MadrasaStudent {
+  id: string;
+  full_name: string;
+  house_id: string; // 'House 100' for external
+  house_number?: number;
+  class_level: string;
+  next_of_kin_name: string;
+  next_of_kin_phone: string;
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
+  enrolled_since: string;
+  status: 'pending' | 'active' | 'inactive';
+}
+
+export interface MadrasaAttendance {
+  id: string;
+  student_id: string;
+  date: string;
+  check_in_time?: string;
+  check_out_time?: string;
+  status: 'present' | 'absent';
+}
+
+export interface MadrasaStaff {
+  id: string;
+  full_name: string;
+  role: string;
+  class_assigned: string;
+  status: 'active' | 'inactive';
+  check_in_time?: string;
+}

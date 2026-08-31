@@ -88,6 +88,18 @@ export function mapAuthErrorMessage(errorMsg?: string, isRegistration: boolean =
     return 'Invalid PIN or house credentials. Please verify your details.';
   }
 
+  // Pass-through specific status messages from our own resolver
+  if (
+    lower.includes('currently pending') ||
+    lower.includes('currently suspended') ||
+    lower.includes('registration is pending') ||
+    lower.includes('no administrator account found') ||
+    lower.includes('no resident account registered') ||
+    lower.includes('no staff account registered')
+  ) {
+    return errorMsg;
+  }
+
   // Registration fallback: never show raw email or syntax errors
   if (isRegistration) {
     return 'Something went wrong creating your account. Please try again.';
@@ -137,7 +149,7 @@ export function validateResidentPin(pin: string): {
   };
 }
 
-// Initial demo users - Seed default admin and security officers
+// Initial system users - Seed default admin and security accounts
 export const INITIAL_DEMO_USERS: AppUser[] = [
   {
     id: 'user-admin-1',
@@ -146,8 +158,6 @@ export const INITIAL_DEMO_USERS: AppUser[] = [
     full_name: 'Estate Administrator',
     phone: '+234 801 000 0001',
     email: 'admin@lighthouseestate.org',
-    house_number: 1,
-    house_unit: 'Main House',
     status: 'active',
     created_at: new Date().toISOString(),
   },
@@ -158,8 +168,6 @@ export const INITIAL_DEMO_USERS: AppUser[] = [
     full_name: 'Master Administrator',
     phone: '+234 801 000 0002',
     email: 'mysmestudio@gmail.com',
-    house_number: 1,
-    house_unit: 'Main House',
     status: 'active',
     created_at: new Date().toISOString(),
   },
@@ -170,45 +178,43 @@ export const INITIAL_DEMO_USERS: AppUser[] = [
     full_name: 'Main Gate Security Officer',
     phone: '+234 801 000 0003',
     email: 'security@lighthouseestate.org',
-    house_number: 0,
-    house_unit: 'Main House',
     status: 'active',
     created_at: new Date().toISOString(),
   }
 ];
 
-const LOCAL_STORAGE_USERS_KEY = 'lighthouse_app_users_v2';
-const LOCAL_STORAGE_CURRENT_USER_KEY = 'lighthouse_current_user_v2';
+const LOCAL_STORAGE_USERS_KEY = 'lighthouse_app_users_v3';
+const LOCAL_STORAGE_CURRENT_USER_KEY = 'lighthouse_current_user_v3';
 
-export function getStoredAppUsers(): AppUser[] {
+export async function getAppUsers(): Promise<AppUser[]> {
   try {
-    if (typeof localStorage !== 'undefined') {
-      const saved = localStorage.getItem(LOCAL_STORAGE_USERS_KEY);
-      if (saved) {
-        const parsed: AppUser[] = JSON.parse(saved);
-        // Ensure standard admin & security accounts always exist
-        INITIAL_DEMO_USERS.forEach((defaultUser) => {
-          if (!parsed.some((u) => u.email.toLowerCase() === defaultUser.email.toLowerCase())) {
-            parsed.push(defaultUser);
-          }
-        });
-        return parsed;
-      }
-      localStorage.setItem(LOCAL_STORAGE_USERS_KEY, JSON.stringify(INITIAL_DEMO_USERS));
+    const { data, error } = await supabase.from('app_users').select('*');
+    if (error) {
+      console.error('Error fetching users:', error);
+      return [];
     }
+    return data as AppUser[];
   } catch (e) {
-    console.error(e);
+    console.error('Error:', e);
+    return [];
   }
-  return INITIAL_DEMO_USERS;
 }
 
-export function saveAppUsers(users: AppUser[]) {
+export async function updateAppUserStatus(userId: string, newStatus: 'active' | 'suspended' | 'pending'): Promise<boolean> {
   try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(LOCAL_STORAGE_USERS_KEY, JSON.stringify(users));
+    const { error } = await supabase
+      .from('app_users')
+      .update({ status: newStatus })
+      .eq('id', userId);
+      
+    if (error) {
+      console.error('Failed to update status in Supabase:', error);
+      return false;
     }
+    return true;
   } catch (e) {
-    console.error(e);
+    console.error('Exception updating status in Supabase:', e);
+    return false;
   }
 }
 
@@ -217,7 +223,12 @@ export function getStoredCurrentUser(): AppUser | null {
     if (typeof localStorage !== 'undefined') {
       const saved = localStorage.getItem(LOCAL_STORAGE_CURRENT_USER_KEY);
       if (saved) {
-        return JSON.parse(saved);
+        const user: AppUser = JSON.parse(saved);
+        if (user.role === 'admin' || user.role === 'master_admin' || user.role === 'security') {
+          delete user.house_number;
+          delete user.house_unit;
+        }
+        return user;
       }
     }
   } catch (e) {
@@ -253,168 +264,67 @@ export async function authenticateEstateUser(
     password?: string;
   }
 ): Promise<{ user: AppUser | null; error?: string; requireMfa?: boolean }> {
-  if (isSupabaseConfigured) {
-    try {
-      let targetEmail = '';
-      let targetPassword = '';
+  try {
+    let targetEmail = '';
+    let targetPassword = '';
+
+    if (role === 'admin' || role === 'master_admin' || role === 'madrasa_admin') {
+      targetEmail = params.email || '';
+      targetPassword = params.password || '';
+    } else {
+      targetEmail = generateSyntheticEmail(
+        role,
+        params.houseNumber || 14,
+        params.houseUnit || 'Main House',
+        params.pin
+      );
+      targetPassword = params.pin || '';
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: targetEmail,
+      password: targetPassword,
+    });
+
+    if (error) {
+      return { user: null, error: mapAuthErrorMessage(error.message, true) };
+    }
+
+    if (data?.user) {
+      const { data: userData, error: userError } = await supabase
+        .from('app_users')
+        .select('*')
+        .eq('auth_user_id', data.user.id)
+        .single();
+
+      if (userError || !userData) {
+        return { user: null, error: 'User profile not found or access denied.' };
+      }
+
+      if (userData.status !== 'active') {
+        return {
+          user: null,
+          error: `Your account is currently ${userData.status}. Please contact the estate office.`,
+        };
+      }
 
       if (role === 'admin' || role === 'master_admin' || role === 'madrasa_admin') {
-        targetEmail = params.email || '';
-        targetPassword = params.password || '';
-      } else {
-        targetEmail = generateSyntheticEmail(
-          role,
-          params.houseNumber || 14,
-          params.houseUnit || 'Main House',
-          params.pin
-        );
-        targetPassword = params.pin || '';
-      }
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: targetEmail,
-        password: targetPassword,
-      });
-
-      if (!error && data?.user) {
-        // Query app_users table with RLS
-        const { data: userData, error: userError } = await supabase
-          .from('app_users')
-          .select('*')
-          .eq('auth_user_id', data.user.id)
-          .single();
-
-        if (!userError && userData) {
-          if (userData.status !== 'active') {
-            return {
-              user: null,
-              error: `Your account is currently ${userData.status}. Please contact the estate office.`,
-            };
-          }
-
-          // Check for Admin MFA requirement
-          if (role === 'admin' || role === 'master_admin' || role === 'madrasa_admin') {
-            const { data: factors } = await supabase.auth.mfa.listFactors();
-            if (factors && factors.totp && factors.totp.length > 0) {
-              return { user: userData as AppUser, requireMfa: true };
-            }
-          }
-
-          setStoredCurrentUser(userData as AppUser);
-          return { user: userData as AppUser };
+        const { data: factors } = await supabase.auth.mfa.listFactors();
+        if (factors && factors.totp && factors.totp.length > 0) {
+          return { user: userData as AppUser, requireMfa: true };
         }
       }
-    } catch (err: any) {
-      console.warn('Supabase auth failed, using reliable local resolver:', err);
-    }
-  }
 
-  // Reliable local resolution & storage
-  const allUsers = getStoredAppUsers();
-  let matchedUser: AppUser | undefined;
-  const inputPin = (params.pin || '').trim().toUpperCase();
-
-  if (role === 'admin' || role === 'master_admin' || role === 'madrasa_admin') {
-    const searchEmail = (params.email || '').toLowerCase().trim();
-    if (!searchEmail) {
-      return { user: null, error: 'Please enter your administrator email.' };
+      setStoredCurrentUser(userData as AppUser);
+      return { user: userData as AppUser };
     }
-    matchedUser = allUsers.find(
-      (u) =>
-        (u.role === 'admin' || u.role === 'master_admin' || u.role === 'madrasa_admin') &&
-        u.email.toLowerCase() === searchEmail
-    );
-
-    if (!matchedUser) {
-      return { user: null, error: 'No administrator account found for this email address.' };
-    }
-
-    if (matchedUser.status !== 'active') {
-      return { user: null, error: `Account is currently ${matchedUser.status}. Please contact estate governance.` };
-    }
-  } else if (role === 'security') {
-    const searchEmail = (params.email || '').toLowerCase().trim();
-    const hNum = Number(params.houseNumber);
-    matchedUser = allUsers.find(
-      (u) => u.role === 'security' && (
-        (searchEmail && u.email?.toLowerCase() === searchEmail) || 
-        (hNum && u.house_number === hNum)
-      )
-    );
-
-    if (!matchedUser) {
-      return { user: null, error: 'No security officer account found. Please check your credentials.' };
-    }
-
-    if (matchedUser.status !== 'active') {
-      return { user: null, error: `Security officer account is currently ${matchedUser.status}.` };
-    }
-  } else if (role === 'staff') {
-    const hNum = Number(params.houseNumber);
-    const hUnit = params.houseUnit || 'Main House';
     
-    if (!hNum) {
-      return { user: null, error: 'Please enter a valid house number.' };
-    }
-
-    matchedUser = allUsers.find(
-      (u) => u.role === 'staff' && u.house_number === hNum && (u.house_unit === hUnit || u.house_unit.toLowerCase() === hUnit.toLowerCase())
-    );
-
-    if (!matchedUser) {
-      return { user: null, error: `No staff account registered for House ${hNum} (${hUnit}). Please complete onboarding first.` };
-    }
-
-    if (matchedUser.status !== 'active') {
-      return { user: null, error: `Staff account is currently ${matchedUser.status}. Please contact your resident employer.` };
-    }
-
-    if (inputPin) {
-      const isPinValid = (matchedUser.pin_hash && verifyPin(inputPin, matchedUser.pin_hash)) || matchedUser.pin === inputPin;
-      if (!isPinValid) {
-        return { user: null, error: 'Invalid PIN. Please enter your valid staff PIN.' };
-      }
-    }
-  } else {
-    // Resident
-    const hNum = Number(params.houseNumber);
-    const hUnit = params.houseUnit || 'Main House';
-
-    if (!hNum) {
-      return { user: null, error: 'Please enter your house number.' };
-    }
-
-    matchedUser = allUsers.find(
-      (u) => u.role === 'resident' && u.house_number === hNum && (u.house_unit === hUnit || u.house_unit.toLowerCase() === hUnit.toLowerCase())
-    );
-
-    if (!matchedUser) {
-      return { user: null, error: `No resident account registered for House ${hNum} (${hUnit}). Please submit a registration first.` };
-    }
-
-    if (matchedUser.status === 'pending') {
-      return { user: null, error: 'Your registration is pending review by the estate office. You will be able to log in once approved.' };
-    }
-
-    if (matchedUser.status !== 'active') {
-      return { user: null, error: `Your resident account is currently ${matchedUser.status}. Please contact the estate office.` };
-    }
-
-    if (inputPin) {
-      const isPinValid = (matchedUser.pin_hash && verifyPin(inputPin, matchedUser.pin_hash)) || matchedUser.pin === inputPin;
-      if (!isPinValid) {
-        return { user: null, error: 'Invalid PIN. Please check your 6-character access PIN.' };
-      }
-    }
+    return { user: null, error: 'Authentication failed.' };
+  } catch (err: any) {
+    return { user: null, error: mapAuthErrorMessage(err?.message, true) };
   }
-
-  setStoredCurrentUser(matchedUser);
-  return { user: matchedUser };
 }
 
-/**
- * Registers a new resident in Supabase Auth & app_users with status 'pending'.
- */
 export async function registerResident(data: {
   fullName: string;
   phone: string;
@@ -422,6 +332,12 @@ export async function registerResident(data: {
   houseNumber: number;
   houseUnit: HouseUnitType;
   pin: string;
+  nokName?: string;
+  nokPhone?: string;
+  nokRelation?: string;
+  madrasa?: boolean;
+  mosque?: boolean;
+  volunteer?: boolean;
 }): Promise<{ success: boolean; user?: AppUser; error?: string }> {
   const pinCheck = validateResidentPin(data.pin);
   if (!pinCheck.isValid) {
@@ -470,6 +386,12 @@ export async function registerResident(data: {
         pin_hash: pinHash,
         status: 'pending',
         dues_status: 'unpaid',
+        emergency_contact_name: data.nokName,
+        emergency_contact_phone: data.nokPhone,
+        emergency_relationship: data.nokRelation,
+        madrasa_enrolment: data.madrasa,
+        mosque_notices: data.mosque,
+        volunteer_committee: data.volunteer,
         created_at: new Date().toISOString(),
       };
 
@@ -536,6 +458,12 @@ export async function registerResident(data: {
     pin_hash: pinHash,
     status: 'pending',
     dues_status: 'exempt',
+    emergency_contact_name: data.nokName,
+    emergency_contact_phone: data.nokPhone,
+    emergency_relationship: data.nokRelation,
+    madrasa_enrolment: data.madrasa,
+    mosque_notices: data.mosque,
+    volunteer_committee: data.volunteer,
     created_at: new Date().toISOString(),
   };
 
@@ -651,3 +579,68 @@ export function updateResidentProfileSettings(
   return { success: true, user: updatedUser };
 }
 
+
+export async function createGuardAccount(data: {
+  fullName: string;
+  phone: string;
+  gateName: string;
+}): Promise<{ success: boolean; pin?: string; error?: string }> {
+  // Generate a random 6-digit PIN
+  const pin = Math.floor(100000 + Math.random() * 900000).toString();
+  const syntheticEmail = generateSyntheticEmail('security', 1, 'Main House', pin);
+  
+  if (isSupabaseConfigured) {
+    try {
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: syntheticEmail,
+        password: pin,
+        options: {
+          data: {
+            full_name: data.fullName,
+            phone: data.phone,
+            role: 'security',
+          },
+        },
+      });
+      if (authError) return { success: false, error: mapAuthErrorMessage(authError.message, true) };
+      
+      const { error: dbError } = await supabase.from('app_users').insert({
+        auth_user_id: authData?.user?.id,
+        full_name: data.fullName,
+        email: syntheticEmail, // Guards don't provide a real email
+        phone: data.phone,
+        role: 'security',
+        house_number: 0,
+        house_unit: 'Main House',
+        status: 'active',
+        pin_hash: hashPin(pin),
+        created_at: new Date().toISOString(),
+      });
+      if (dbError) return { success: false, error: dbError.message };
+    } catch (e: any) {
+      console.warn('Supabase guard creation failed, falling back to local', e);
+    }
+  }
+
+  // Local fallback
+  const allUsers = getStoredAppUsers();
+  const newUser: AppUser = {
+    id: `u-${Date.now()}`,
+    auth_user_id: `auth-sec-${Date.now()}`,
+    full_name: data.fullName,
+    email: syntheticEmail,
+    phone: data.phone,
+    role: 'security',
+    house_number: 0,
+    house_unit: 'Main House',
+    status: 'active',
+    pin_hash: hashPin(pin),
+    created_at: new Date().toISOString(),
+  };
+  saveAppUsers([...allUsers, newUser]);
+  
+  return { success: true, pin };
+}
+
+export function getStoredAppUsers(): AppUser[] { console.warn('getStoredAppUsers called but local mocks are deprecated.'); return []; }
+export function saveAppUsers(users: any[]): void { console.warn('saveAppUsers called but local mocks are deprecated.'); }

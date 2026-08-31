@@ -128,7 +128,9 @@ export const HouseholdHubPage: React.FC<HouseholdHubPageProps> = ({ currentUser,
     const res = await createStaffInvite({
       employer: currentUser,
       role: inviteRole,
-      workLocation: `House ${currentUser?.house_number || 14} (${currentUser?.house_unit || 'Main House'})`,
+      workLocation: currentUser?.house_number 
+        ? `House ${currentUser.house_number} (${currentUser?.house_unit || 'Main House'})`
+        : 'Estate Facility',
       schedule: {
         days: inviteDays,
         startTime: inviteStartTime,

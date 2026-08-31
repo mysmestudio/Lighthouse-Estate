@@ -19,6 +19,9 @@ import { StaffOnboardingPage } from './pages/StaffOnboardingPage';
 import { StaffDirectoryPage } from './pages/StaffDirectoryPage';
 import { FixItTicketsPage } from './pages/FixItTicketsPage';
 import { MarketplacePage } from './pages/MarketplacePage';
+import { TownhallPollsPage } from './pages/TownhallPollsPage';
+import { GuardSosPanelPage } from './pages/GuardSosPanelPage';
+import { MadrasaAdminPage } from './pages/MadrasaAdminPage';
 import { FacilitiesPage } from './pages/FacilitiesPage';
 import { SettingsProfilePage } from './pages/SettingsProfilePage';
 import { PersistentSOSButton } from './components/sos/PersistentSOSButton';
@@ -69,7 +72,7 @@ export default function App() {
       case '/register':
         return <RegisterPage navigate={navigate} />;
       case '/dashboard':
-        return <DashboardPage currentUser={currentUser} navigate={navigate} />;
+        return <DashboardPage currentUser={currentUser} navigate={navigate} onLogout={handleLogout} />;
       case '/passes':
         return <PassesPage currentUser={currentUser} navigate={navigate} />;
       case '/facilities':
@@ -82,6 +85,12 @@ export default function App() {
       case '/fix-it-tickets':
         return <FixItTicketsPage currentUser={currentUser} navigate={navigate} />;
       case '/community/marketplace':
+      case '/polls':
+        return <TownhallPollsPage currentUser={currentUser} navigate={navigate} />;
+      case '/madrasa':
+        return <MadrasaAdminPage currentUser={currentUser} navigate={navigate} onLogout={handleLogout} />;
+      case '/gate/alerts':
+        return <GuardSosPanelPage currentUser={currentUser} navigate={navigate} />;
       case '/marketplace':
         return <MarketplacePage currentUser={currentUser} navigate={navigate} />;
       case '/household':
@@ -104,10 +113,10 @@ export default function App() {
           />
         );
       case '/admin':
-        return <AdminPage currentUser={currentUser} navigate={navigate} />;
+        return <AdminPage currentUser={currentUser} navigate={navigate} onLogout={handleLogout} />;
       case '/':
       default:
-        return <LandingPage navigate={navigate} currentUser={currentUser} />;
+        return <LandingPage navigate={navigate} />;
     }
   };
 
@@ -126,7 +135,7 @@ export default function App() {
             onLogout={handleLogout}
           />
         )}
-        <main className={isLandingPage ? 'h-screen overflow-hidden' : 'flex-1'}>
+        <main className={'flex-1'}>
           {renderRoute()}
         </main>
         {!isStandaloneMockupPage && <Footer />}
